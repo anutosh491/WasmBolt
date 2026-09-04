@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Inspect, optimize, compile and run C, C++ and LLVM IR entirely in your browser." />
+    <title>WasmBolt — The LLVM Project in your browser</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <div>
+          <strong>WasmBolt</strong>
+          <span>The LLVM Project in your browser</span>
+        </div>
+      </div>
+      <div class="runtime-state">
+        <span id="status-dot" class="status-dot loading"></span>
+        <span id="status">Loading compiler runtime…</span>
+        <span id="version" class="version"></span>
+      </div>
+      <div class="header-actions">
+        <button id="share" class="quiet">Share</button>
+        <a href="https://github.com/anutosh491/wasmbolt" target="_blank" rel="noreferrer">GitHub</a>
+      </div>
+    </header>
+
+    <section class="controls" aria-label="Compiler controls">
+      <label>
+        <span>Language</span>
+        <select id="language">
+          <option value="cpp">C++23</option>
+          <option value="c">C23</option>
+          <option value="llvm">LLVM IR</option>
+        </select>
+      </label>
+      <label>
+        <span>Target</span>
+        <select id="target">
+          <option value="wasm32-unknown-emscripten">WebAssembly 32</option>
+          <option value="x86_64-unknown-linux-gnu">x86-64</option>
+          <option value="aarch64-unknown-linux-gnu">AArch64</option>
+        </select>
+      </label>
+      <label>
+        <span>Optimization</span>
+        <select id="optimization">
+          <option value="0">O0</option>
+          <option value="1">O1</option>
+          <option value="2" selected>O2</option>
+          <option value="3">O3</option>
+        </select>
+      </label>
+      <div class="primary-actions">
+        <button id="compile" class="primary" disabled>Compile</button>
+        <button id="compile-run" class="accent" disabled>Compile &amp; Run</button>
+      </div>
+    </section>
+
+    <main id="workspace" class="workspace">
+      <section class="pane source-pane">
+        <div class="pane-title">
+          <div>
+            <span class="eyebrow">SOURCE</span>
+            <strong id="filename">snippet.cpp</strong>
+          </div>
+          <div class="source-actions">
+            <button id="clear-source" class="quiet">Clear</button>
+            <button id="reset-source" class="quiet">Reset</button>
+            <span class="local-badge">runs locally</span>
+          </div>
+        </div>
+        <textarea id="source" spellcheck="false" aria-label="Source code"></textarea>
+      </section>
+
+      <div id="vertical-resizer" class="resizer vertical" title="Drag to resize"></div>
+
+      <section class="pane output-pane">
+        <div class="pane-title output-title">
+          <nav id="tabs" class="tabs" aria-label="Compiler output">
+            <button data-tab="ast">AST</button>
+            <button data-tab="ir">LLVM IR</button>
+            <button data-tab="optimized">Optimized IR</button>
+            <button data-tab="analysis">Analysis</button>
+            <button data-tab="cfg">CFG</button>
+            <button data-tab="assembly">Assembly</button>
+            <button data-tab="wasm">Wasm module</button>
+            <button data-tab="files">Files</button>
+          </nav>
+          <button id="copy-output" class="icon-button" title="Copy output">Copy</button>
+        </div>
+        <pre id="output" class="code-output"><span class="muted">Choose a stage or build the program to begin.</span></pre>
+        <div id="cfg-view" class="cfg-view hidden">
+          <img id="cfg-image" alt="LLVM control-flow graph" />
+        </div>
+
+        <div id="file-browser" class="file-browser hidden">
+          <label>
+            <span>Browser filesystem</span>
+            <select id="file-select"></select>
+          </label>
+          <button id="open-file">Open</button>
+          <button id="download-file" class="quiet">Download</button>
+        </div>
+
+      </section>
+
+      <div id="horizontal-resizer" class="resizer horizontal" title="Drag to resize"></div>
+
+      <details id="advanced" class="advanced-pane">
+        <summary><span>Advanced terminal</span><small>run clang, opt, llc, dot and wasm-ld directly</small></summary>
+        <div class="advanced-content">
+          <section id="runner" class="runner hidden">
+            <label><span>Export</span><select id="symbol"></select></label>
+            <label>
+              <span>Detected signature</span>
+              <select id="signature">
+                <option value="1">i32(i32)</option>
+                <option value="2">i32(i32, i32)</option>
+                <option value="0">i32()</option>
+                <option value="4">f64(f64)</option>
+                <option value="5">f64(f64, f64)</option>
+                <option value="3">f64()</option>
+                <option value="6">void()</option>
+              </select>
+            </label>
+            <label id="arg-a-wrap"><span>Argument 1</span><input id="arg-a" type="number" value="5" step="any" /></label>
+            <label id="arg-b-wrap" class="hidden"><span>Argument 2</span><input id="arg-b" type="number" value="4" step="any" /></label>
+            <button id="execute" class="accent">Run export</button>
+            <output id="result"></output>
+          </section>
+          <section class="console-pane">
+            <div class="terminal-actions">
+              <button id="load-wasm" class="quiet" disabled>Load selected .wasm</button>
+              <button id="clear-log" class="quiet">Clear</button>
+            </div>
+            <div id="terminal-scroll" class="terminal-scroll">
+              <pre id="log"></pre>
+              <div class="command-line">
+                <span>wasmbolt %</span>
+                <input id="command" aria-label="Run an in-process command" placeholder="type a command" autocomplete="off" spellcheck="false" />
+                <button id="run-command" disabled>Run</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </details>
+    </main>
+
+    <footer>
+      <span>No compiler server. Clang, LLVM, LLD and generated code execute in this browser.</span>
+      <span id="targets">Targets: loading…</span>
+    </footer>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

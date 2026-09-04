@@ -1,0 +1,9 @@
+name: wasmbolt-wasm-host
+
+channels:
+  - https://prefix.dev/emscripten-forge-4x
+  - https://prefix.dev/conda-forge
+
+dependencies:
+  - llvm =23.1.0 =hd68d874_1
+  - graphviz =15.*

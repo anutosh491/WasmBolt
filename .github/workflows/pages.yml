@@ -1,0 +1,109 @@
+name: Build and deploy WasmBolt
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check out the matching LLVM driver sources
+        uses: actions/checkout@v6
+        with:
+          repository: llvm/llvm-project
+          ref: llvmorg-23.1.0
+          path: llvm-project
+          sparse-checkout: |
+            llvm/tools/llc
+
+      - name: Install the Emscripten build environment
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: environment-wasm-build.yml
+          environment-name: wasmbolt-wasm-build
+          init-shell: bash
+
+      - name: Install the WebAssembly LLVM target packages
+        shell: bash -l {0}
+        run: |
+          micromamba create -y \
+            -n wasmbolt-wasm-host \
+            -f environment-wasm-host.yml \
+            --platform=emscripten-wasm32
+
+      - name: Build WasmBolt
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          export LLVM_WASM_PREFIX="${MAMBA_ROOT_PREFIX}/envs/wasmbolt-wasm-host"
+          export EMSCRIPTEN_SYSROOT="${CONDA_PREFIX}/opt/emsdk/upstream/emscripten/cache/sysroot"
+          export CLANG_RESOURCE_TREE="${LLVM_WASM_PREFIX}/lib/clang/23"
+          export LLVM_SOURCE_TREE="${GITHUB_WORKSPACE}/llvm-project"
+          bash scripts/build.sh
+
+      - name: Smoke-test the complete browser pipeline
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          python -m http.server 8000 --bind 127.0.0.1 --directory site >/tmp/wasmbolt-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill ${server_pid}' EXIT
+          timeout 240 google-chrome \
+            --headless=new \
+            --no-sandbox \
+            --disable-gpu \
+            --user-data-dir=/tmp/wasmbolt-chrome \
+            --virtual-time-budget=180000 \
+            --dump-dom \
+            'http://127.0.0.1:8000/?autorun=1' >/tmp/wasmbolt-dom.html
+          grep -q 'data-smoke-test="passed"' /tmp/wasmbolt-dom.html
+          timeout 240 google-chrome \
+            --headless=new \
+            --no-sandbox \
+            --disable-gpu \
+            --user-data-dir=/tmp/wasmbolt-chrome-c \
+            --virtual-time-budget=180000 \
+            --dump-dom \
+            'http://127.0.0.1:8000/?autorun=1&language=c' >/tmp/wasmbolt-c-dom.html
+          grep -q 'data-smoke-test="passed"' /tmp/wasmbolt-c-dom.html
+          timeout 240 google-chrome \
+            --headless=new \
+            --no-sandbox \
+            --disable-gpu \
+            --user-data-dir=/tmp/wasmbolt-chrome-llvm \
+            --virtual-time-budget=180000 \
+            --dump-dom \
+            'http://127.0.0.1:8000/?autorun=1&language=llvm' >/tmp/wasmbolt-llvm-dom.html
+          grep -q 'data-smoke-test="passed"' /tmp/wasmbolt-llvm-dom.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
