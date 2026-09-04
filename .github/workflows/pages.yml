@@ -63,33 +63,38 @@ jobs:
           python -m http.server 8000 --bind 127.0.0.1 --directory site >/tmp/wasmbolt-server.log 2>&1 &
           server_pid=$!
           trap 'kill ${server_pid}' EXIT
-          timeout 240 google-chrome \
-            --headless=new \
-            --no-sandbox \
-            --disable-gpu \
-            --user-data-dir=/tmp/wasmbolt-chrome \
-            --virtual-time-budget=180000 \
-            --dump-dom \
-            'http://127.0.0.1:8000/?autorun=1' >/tmp/wasmbolt-dom.html
-          grep -q 'data-smoke-test="passed"' /tmp/wasmbolt-dom.html
-          timeout 240 google-chrome \
-            --headless=new \
-            --no-sandbox \
-            --disable-gpu \
-            --user-data-dir=/tmp/wasmbolt-chrome-c \
-            --virtual-time-budget=180000 \
-            --dump-dom \
-            'http://127.0.0.1:8000/?autorun=1&language=c' >/tmp/wasmbolt-c-dom.html
-          grep -q 'data-smoke-test="passed"' /tmp/wasmbolt-c-dom.html
-          timeout 240 google-chrome \
-            --headless=new \
-            --no-sandbox \
-            --disable-gpu \
-            --user-data-dir=/tmp/wasmbolt-chrome-llvm \
-            --virtual-time-budget=180000 \
-            --dump-dom \
-            'http://127.0.0.1:8000/?autorun=1&language=llvm' >/tmp/wasmbolt-llvm-dom.html
-          grep -q 'data-smoke-test="passed"' /tmp/wasmbolt-llvm-dom.html
+
+          smoke_test() {
+            language="$1"
+            dom="/tmp/wasmbolt-${language}-dom.html"
+            chrome_log="/tmp/wasmbolt-${language}-chrome.log"
+            url="http://127.0.0.1:8000/?autorun=1&language=${language}"
+
+            if ! timeout 240 google-chrome \
+              --headless=new \
+              --no-sandbox \
+              --disable-gpu \
+              --user-data-dir="/tmp/wasmbolt-chrome-${language}" \
+              --virtual-time-budget=180000 \
+              --dump-dom \
+              "${url}" >"${dom}" 2>"${chrome_log}"; then
+              cat "${chrome_log}"
+              cat /tmp/wasmbolt-server.log
+              return 1
+            fi
+
+            if ! grep -q 'data-smoke-test="passed"' "${dom}"; then
+              echo "Smoke test failed for ${language}."
+              tail -c 20000 "${dom}"
+              cat "${chrome_log}"
+              cat /tmp/wasmbolt-server.log
+              return 1
+            fi
+          }
+
+          smoke_test cpp
+          smoke_test c
+          smoke_test llvm
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4

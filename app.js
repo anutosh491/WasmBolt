@@ -856,12 +856,19 @@ async function loadCompiler() {
   }
 }
 
-restoreState();
-const requestedLanguage = new URLSearchParams(location.search).get("language");
+const startupParameters = new URLSearchParams(location.search);
+const requestedLanguage = startupParameters.get("language");
+if (startupParameters.get("autorun"))
+  resetSource();
+else
+  restoreState();
 if (["c", "cpp", "llvm"].includes(requestedLanguage)) {
   elements.language.value = requestedLanguage;
   resetSource();
 }
 wireUi();
 switchTab("ir");
-loadCompiler();
+// Keep the document's load event pending until the asynchronous compiler
+// initialization (and an optional CI autorun) has completed. This gives
+// headless browsers a deterministic readiness boundary.
+await loadCompiler();
