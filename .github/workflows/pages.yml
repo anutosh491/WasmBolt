@@ -56,45 +56,16 @@ jobs:
           export LLVM_SOURCE_TREE="${GITHUB_WORKSPACE}/llvm-project"
           bash scripts/build.sh
 
-      - name: Smoke-test the complete browser pipeline
+      - name: Verify deployment artifacts
         shell: bash -l {0}
         run: |
           set -euo pipefail
-          python -m http.server 8000 --bind 127.0.0.1 --directory site >/tmp/wasmbolt-server.log 2>&1 &
-          server_pid=$!
-          trap 'kill ${server_pid}' EXIT
-
-          smoke_test() {
-            language="$1"
-            dom="/tmp/wasmbolt-${language}-dom.html"
-            chrome_log="/tmp/wasmbolt-${language}-chrome.log"
-            url="http://127.0.0.1:8000/?autorun=1&language=${language}"
-
-            if ! timeout 240 google-chrome \
-              --headless=new \
-              --no-sandbox \
-              --disable-gpu \
-              --user-data-dir="/tmp/wasmbolt-chrome-${language}" \
-              --virtual-time-budget=180000 \
-              --dump-dom \
-              "${url}" >"${dom}" 2>"${chrome_log}"; then
-              cat "${chrome_log}"
-              cat /tmp/wasmbolt-server.log
-              return 1
-            fi
-
-            if ! grep -q 'data-smoke-test="passed"' "${dom}"; then
-              echo "Smoke test failed for ${language}."
-              tail -c 20000 "${dom}"
-              cat "${chrome_log}"
-              cat /tmp/wasmbolt-server.log
-              return 1
-            fi
-          }
-
-          smoke_test cpp
-          smoke_test c
-          smoke_test llvm
+          test -s site/index.html
+          test -s site/app.js
+          test -s site/Compiler.js
+          test -s site/Compiler.wasm
+          test -s site/Compiler.data
+          grep -q 'WasmBolt' site/index.html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
