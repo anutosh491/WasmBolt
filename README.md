@@ -38,6 +38,16 @@ C / C++ source
   Wasm modules;
 - draggable panes, exact command logs, local persistence and shareable URLs.
 
+## Examples 
+
+1) C++, LLVM IR & SymEngine in WasmBolt : https://youtu.be/PedVGFpgax4?si=B2ncZC9Wg6E1Bwmf
+2) MLIR in WasmBolt : https://youtu.be/yga2lWelne4?si=4SfSIoUZwEU2YybP
+3) GodBolt initial example 
+
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/ecfb1946-d77f-4cf8-9a1f-108f6bebfba2" />
+
+## Notes
+
 The initial snippet deliberately has no `main()`, just like a Compiler Explorer
 example. A translation unit does not need an entry point for AST, IR,
 optimization or assembly inspection. WasmBolt only needs a callable function
