@@ -97,6 +97,8 @@ const outputs = {
 let compiler = null;
 let activeCapture = null;
 let activeLogCapture = null;
+let activeStdoutCapture = null;
+let activeStderrCapture = null;
 let activeTab = "ir";
 let resourceDir = "/lib/clang/23";
 let currentModulePath = "";
@@ -111,6 +113,7 @@ function appendLog(line, kind = "out") {
   if (activeCapture) {
     activeCapture.push(text);
     activeLogCapture.push(rendered);
+    (kind === "err" ? activeStderrCapture : activeStdoutCapture).push(text);
     return;
   }
   elements.log.append(`${rendered}\n`);
@@ -304,27 +307,55 @@ function commandText(settings, action, target = elements.target.value) {
   throw new Error(`Unknown action ${action}`);
 }
 
-function run(command) {
+function run(command, redirects = {}) {
   appendLog("");
   activeCapture = [];
   activeLogCapture = [];
+  activeStdoutCapture = [];
+  activeStderrCapture = [];
   let code;
   let captured;
   let capturedLog;
+  let capturedStdout;
+  let capturedStderr;
   try {
     code = compiler.ccall("run_command", "number", ["string"], [command]);
     captured = activeCapture.join("\n");
   } finally {
     capturedLog = activeLogCapture.join("\n");
+    capturedStdout = activeStdoutCapture.join("\n");
+    capturedStderr = activeStderrCapture.join("\n");
     activeCapture = null;
     activeLogCapture = null;
-    if (capturedLog) appendLog(capturedLog);
+    activeStdoutCapture = null;
+    activeStderrCapture = null;
+    if (redirects.stdout)
+      compiler.FS.writeFile(redirects.stdout, `${capturedStdout}\n`);
+    if (redirects.stderr)
+      compiler.FS.writeFile(redirects.stderr, `${capturedStderr}\n`);
+    if (!redirects.stdout && !redirects.stderr && capturedLog)
+      appendLog(capturedLog);
+    else {
+      if (!redirects.stdout && capturedStdout) appendLog(capturedStdout);
+      if (!redirects.stderr && capturedStderr) appendLog(capturedStderr, "err");
+    }
   }
   if (code !== 0) {
     const detail = capturedLog?.trim();
     throw new Error(detail || `Command failed with exit code ${code}`);
   }
   return captured;
+}
+
+function parseCommandRedirections(command) {
+  const redirects = {};
+  let executable = command;
+  const stderr = executable.match(/(?:^|\s)2>\s*(?:"([^"]+)"|'([^']+)'|(\S+))/);
+  if (stderr) {
+    redirects.stderr = stderr[1] || stderr[2] || stderr[3];
+    executable = `${executable.slice(0, stderr.index)} ${executable.slice(stderr.index + stderr[0].length)}`;
+  }
+  return { command: executable.trim(), redirects };
 }
 
 function emitIr(settings, target) {
@@ -792,8 +823,10 @@ function wireUi() {
       // Keep the virtual filesystem in sync with the visible editor so a raw
       // command works immediately after a fresh page load.
       writeSource();
-      const captured = run(command);
-      const outputPath = commandOutputPath(command);
+      const parsed = parseCommandRedirections(command);
+      const captured = run(parsed.command, parsed.redirects);
+      const outputPath = parsed.redirects.stderr ||
+        commandOutputPath(parsed.command);
       refreshWorkspaceFiles(outputPath);
       if (outputPath && outputPath !== "-" && workspaceFiles().includes(outputPath))
         openWorkspaceFile(outputPath);

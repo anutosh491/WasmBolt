@@ -41,3 +41,27 @@ Open `llvm-dialect.mlir` to inspect the final LLVM-dialect functions,
 descriptors, branches, loads, stores and arithmetic. Every command above is
 parsed and executed by MLIR's `MlirOptMain` driver inside the browser; WasmBolt
 does not map pass names itself.
+
+## 5. Generate and render an MLIR operation graph
+
+MLIR's `view-op-graph` pass writes Graphviz DOT to standard error. The advanced
+terminal supports ordinary `2>` redirection into the browser filesystem:
+
+```bash
+mlir-opt --view-op-graph /workspace/optimized.mlir -o /workspace/unchanged.mlir 2> /workspace/mlir-dataflow.dot
+```
+
+To focus on control-flow edges after lowering Linalg to loops:
+
+```bash
+mlir-opt --view-op-graph='print-data-flow-edges=false print-control-flow-edges=true' /workspace/loops.mlir -o /workspace/unchanged.mlir 2> /workspace/mlir-cfg.dot
+```
+
+Render either graph to SVG with the in-process Graphviz driver:
+
+```bash
+dot -Tsvg /workspace/mlir-cfg.dot -o /workspace/mlir-cfg.svg
+```
+
+WasmBolt opens the resulting SVG in the CFG viewer. Both graph generation and
+rendering happen locally in the browser.
