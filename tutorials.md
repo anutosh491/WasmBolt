@@ -1,5 +1,7 @@
 # WasmBolt tutorials
 
+- [MLIR](tutorial_mlir.md): optimize a Linalg/Tensor program, bufferize it,
+  lower through loops and control flow, and reach the LLVM dialect.
 - [WebAssembly](tutorial_wasm.md): C++, LLVM IR, Boost.cpp, SymEngine,
   optimization, code generation, linking, loading, and execution.
 - [AArch64](tutorial_aarch64.md): freestanding C++ and LLVM IR through

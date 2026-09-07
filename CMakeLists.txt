@@ -4,6 +4,7 @@ project(wasmbolt LANGUAGES CXX)
 find_package(LLVM REQUIRED CONFIG)
 find_package(LLD REQUIRED CONFIG)
 find_package(Clang REQUIRED CONFIG)
+find_package(MLIR REQUIRED CONFIG)
 find_package(Graphviz REQUIRED CONFIG)
 
 set(EMSCRIPTEN_SYSROOT "" CACHE PATH
@@ -55,7 +56,28 @@ target_include_directories(LLVMLlcDriver PRIVATE
 )
 target_link_libraries(LLVMLlcDriver PUBLIC LLVMMIRParser)
 
+add_executable(WasmBoltMlirOpt MlirOptDriver.cpp)
+target_compile_features(WasmBoltMlirOpt PRIVATE cxx_std_20)
+target_compile_options(WasmBoltMlirOpt PRIVATE -fPIC -fwasm-exceptions -fno-rtti)
+target_include_directories(WasmBoltMlirOpt PRIVATE
+  ${LLVM_INCLUDE_DIRS}
+  ${MLIR_INCLUDE_DIRS}
+)
+target_link_libraries(WasmBoltMlirOpt PRIVATE MLIRMlirOptMain)
+target_link_options(WasmBoltMlirOpt PRIVATE
+  "SHELL:-fwasm-exceptions"
+  "SHELL:-sSIDE_MODULE=2"
+  "SHELL:-Wl,-Bsymbolic"
+  "SHELL:-Wl,--export=wasmbolt_mlir_opt_main"
+)
+set_target_properties(WasmBoltMlirOpt PROPERTIES
+  PREFIX ""
+  OUTPUT_NAME "WasmBoltMlirOpt"
+  SUFFIX ".so"
+)
+
 add_executable(Compiler CompilerModule.cpp)
+add_dependencies(Compiler WasmBoltMlirOpt)
 target_compile_features(Compiler PRIVATE cxx_std_20)
 target_compile_options(Compiler PRIVATE -fPIC -fwasm-exceptions -fno-rtti)
 target_include_directories(Compiler PRIVATE
@@ -111,10 +133,11 @@ target_link_options(Compiler PRIVATE
   "SHELL:-sTOTAL_STACK=32MB"
   "SHELL:-sMAIN_MODULE=1"
   "SHELL:-sNO_EXIT_RUNTIME=1"
-  "SHELL:-sEXPORTED_RUNTIME_METHODS=ccall,cwrap,FS"
+  "SHELL:-sEXPORTED_RUNTIME_METHODS=ccall,cwrap,FS,loadDynamicLibrary"
   "SHELL:--preload-file=${RUNTIME_ROOT}/include@/include"
   "SHELL:--preload-file=${RUNTIME_ROOT}/lib@/lib"
   "SHELL:--preload-file=${CLANG_RESOURCE_TREE}@${CLANG_RESOURCE_DIR}"
+  "SHELL:--preload-file=${CMAKE_CURRENT_BINARY_DIR}/WasmBoltMlirOpt.so@/lib/WasmBoltMlirOpt.so"
 )
 
 foreach(FILE index.html app.js styles.css)

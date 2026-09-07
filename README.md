@@ -1,6 +1,6 @@
 # WasmBolt
 
-**WasmBolt is a browser-native laboratory for C, C++ and LLVM.** It embeds
+**WasmBolt is a browser-native laboratory for MLIR, C, C++ and LLVM.** It embeds
 Clang's frontend, LLVM's optimization and code-generation libraries, and the
 WebAssembly LLD linker into one Emscripten application. There is no compiler
 server and no compiler subprocess: the complete pipeline runs locally in the
@@ -22,6 +22,7 @@ C / C++ source
 ## What works
 
 - C23 and C++23 source;
+- tensor-based MLIR input and the complete `mlir-opt` dialect/pass registry;
 - Clang diagnostics and textual AST dumps;
 - unoptimized and optimized LLVM IR;
 - configurable new-pass-manager pipelines such as `default<O2>`;
@@ -60,7 +61,7 @@ The primary interface has only **Compile** and **Compile & Run**. Select an
 output tab before choosing **Compile** to produce that representation.
 **Compile & Run** emits a Wasm object, links and loads the side module, detects
 the exported function signature, and executes it. Open **Advanced terminal**
-for complete manual control: raw `clang`, `opt`, `llc`, `dot`, and `wasm-ld`
+for complete manual control: raw `clang`, `mlir-opt`, `opt`, `llc`, `dot`, and `wasm-ld`
 commands, generated files, loading an existing `.wasm`, manual export calls,
 and analysis output. The terminal adds no implicit optimization or link flags.
 

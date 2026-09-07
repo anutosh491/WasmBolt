@@ -6,4 +6,5 @@ channels:
 
 dependencies:
   - llvm =23.1.0 =hd68d874_1
+  - mlir-python-bindings =23.1.0 =np23py313ha84d64f_0
   - graphviz =15.*

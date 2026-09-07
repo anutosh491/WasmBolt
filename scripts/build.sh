@@ -13,7 +13,6 @@ if [[ -z "${LLVM_SOURCE_TREE:-}" ]]; then
   echo "Set LLVM_SOURCE_TREE to an llvm-project checkout matching the packaged LLVM version." >&2
   exit 2
 fi
-
 resource_tree="${CLANG_RESOURCE_TREE:-${LLVM_WASM_PREFIX}/lib/clang/23}"
 
 emcmake cmake -S . -B build \
@@ -22,6 +21,7 @@ emcmake cmake -S . -B build \
   -DLLVM_DIR="${LLVM_WASM_PREFIX}/lib/cmake/llvm" \
   -DClang_DIR="${LLVM_WASM_PREFIX}/lib/cmake/clang" \
   -DLLD_DIR="${LLVM_WASM_PREFIX}/lib/cmake/lld" \
+  -DMLIR_DIR="${LLVM_WASM_PREFIX}/lib/cmake/mlir" \
   -DGraphviz_DIR="${LLVM_WASM_PREFIX}/lib/cmake/Graphviz" \
   -DLLVM_SOURCE_TREE="${LLVM_SOURCE_TREE}" \
   -DEMSCRIPTEN_SYSROOT="${EMSCRIPTEN_SYSROOT}" \
@@ -30,6 +30,6 @@ emcmake cmake -S . -B build \
 cmake --build build --parallel
 
 mkdir -p site
-cp index.html app.js styles.css tutorials.md tutorial_wasm.md \
+cp index.html app.js styles.css tutorials.md tutorial_mlir.md tutorial_wasm.md \
   tutorial_aarch64.md tutorial_x86.md site/
 cp build/Compiler.js build/Compiler.wasm build/Compiler.data site/
