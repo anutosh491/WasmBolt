@@ -261,6 +261,31 @@ int runLlc(const std::vector<std::string> &Args) {
   return wasmbolt_llc_main(static_cast<int>(Argv.size()), Argv.data());
 }
 
+int runMlirOpt(const std::vector<std::string> &Args) {
+  using MlirOptMain = int (*)(int, char **);
+  static MlirOptMain Driver = [] {
+    void *Handle = dlopen("/lib/WasmBoltMlirOpt.so", RTLD_NOW | RTLD_LOCAL);
+    if (!Handle) {
+      llvm::errs() << "mlir-opt: unable to load driver: " << dlerror() << '\n';
+      return static_cast<MlirOptMain>(nullptr);
+    }
+    dlerror();
+    auto *Entry = reinterpret_cast<MlirOptMain>(
+        dlsym(Handle, "wasmbolt_mlir_opt_main"));
+    if (const char *Error = dlerror())
+      llvm::errs() << "mlir-opt: unable to resolve driver: " << Error << '\n';
+    return Entry;
+  }();
+  if (!Driver)
+    return 1;
+
+  std::vector<char *> Argv;
+  Argv.reserve(Args.size());
+  for (const std::string &Arg : Args)
+    Argv.push_back(const_cast<char *>(Arg.c_str()));
+  return Driver(static_cast<int>(Argv.size()), Argv.data());
+}
+
 std::unordered_map<std::string, void *> LoadedModules;
 
 std::string renderDotToSvg(llvm::StringRef Dot) {
@@ -391,6 +416,8 @@ extern "C" EMSCRIPTEN_KEEPALIVE int run_command(const char *Command) {
     return runOpt(Args);
   if (Program == "llc")
     return runLlc(Args);
+  if (Program == "mlir-opt")
+    return runMlirOpt(Args);
   if (Program == "dot")
     return runDot(Args);
 

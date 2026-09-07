@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="Inspect, optimize, compile and run C, C++ and LLVM IR entirely in your browser." />
+    <meta name="description" content="Inspect, optimize, compile and run C, C++, MLIR and LLVM IR entirely in your browser." />
     <title>WasmBolt — The LLVM Project in your browser</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
@@ -33,6 +33,7 @@
         <select id="language">
           <option value="cpp">C++23</option>
           <option value="c">C23</option>
+          <option value="mlir">MLIR</option>
           <option value="llvm">LLVM IR</option>
         </select>
       </label>
@@ -81,6 +82,7 @@
         <div class="pane-title output-title">
           <nav id="tabs" class="tabs" aria-label="Compiler output">
             <button data-tab="ast">AST</button>
+            <button data-tab="mlir">MLIR</button>
             <button data-tab="ir">LLVM IR</button>
             <button data-tab="optimized">Optimized IR</button>
             <button data-tab="analysis">Analysis</button>
@@ -110,7 +112,7 @@
       <div id="horizontal-resizer" class="resizer horizontal" title="Drag to resize"></div>
 
       <details id="advanced" class="advanced-pane">
-        <summary><span>Advanced terminal</span><small>run clang, opt, llc, dot and wasm-ld directly</small></summary>
+        <summary><span>Advanced terminal</span><small>run clang, mlir-opt, opt, llc, dot and wasm-ld directly</small></summary>
         <div class="advanced-content">
           <section id="runner" class="runner hidden">
             <label><span>Export</span><select id="symbol"></select></label>
@@ -150,7 +152,7 @@
     </main>
 
     <footer>
-      <span>No compiler server. Clang, LLVM, LLD and generated code execute in this browser.</span>
+      <span>No compiler server. MLIR, Clang, LLVM, LLD and generated code execute in this browser.</span>
       <span id="targets">Targets: loading…</span>
     </footer>
 

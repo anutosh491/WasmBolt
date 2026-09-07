@@ -55,6 +55,18 @@ const examples = {
 
   return out;
 }`,
+  mlir: `module {
+  func.func @matmul(%lhs: tensor<2x3xf32>, %rhs: tensor<3x2xf32>) -> tensor<2x2xf32> {
+    %zero = arith.constant 0.0 : f32
+    %empty = tensor.empty() : tensor<2x2xf32>
+    %initialized = linalg.fill ins(%zero : f32)
+      outs(%empty : tensor<2x2xf32>) -> tensor<2x2xf32>
+    %result = linalg.matmul
+      ins(%lhs, %rhs : tensor<2x3xf32>, tensor<3x2xf32>)
+      outs(%initialized : tensor<2x2xf32>) -> tensor<2x2xf32>
+    return %result : tensor<2x2xf32>
+  }
+}`,
   llvm: `define i32 @absolute_difference(i32 %a, i32 %b) {
 entry:
   %greater = icmp sgt i32 %a, %b
@@ -72,6 +84,7 @@ b_greater:
 
 const outputs = {
   ast: "",
+  mlir: "Select MLIR and compile, or use mlir-opt from the advanced terminal.",
   ir: "",
   optimized: "",
   analysis: "Analysis-only command output appears here.",
@@ -113,11 +126,22 @@ function setStatus(text, state = "ready") {
 function setBusy(value, message = "Working…") {
   busy = value;
   for (const button of [elements.compile, elements.compileRun, elements.loadWasm, elements.runCommand])
-    button.disabled = value || !compiler;
+    button.disabled = value || !compiler ||
+      (button === elements.compileRun && elements.language.value === "mlir");
   if (value) setStatus(message, "loading");
 }
 
 function languageSettings() {
+  if (elements.language.value === "mlir") {
+    return {
+      driver: "mlir-opt",
+      filename: "/workspace/input.mlir",
+      label: "input.mlir",
+      standard: "",
+      x: "",
+      mlir: true,
+    };
+  }
   if (elements.language.value === "llvm") {
     return {
       driver: "",
@@ -211,7 +235,7 @@ function refreshWorkspaceFiles(preferred = "") {
 }
 
 function isTextFile(path) {
-  return /\.(?:c|cc|cpp|cxx|h|hpp|ll|mir|s|dot|svg|txt|json)$/i.test(path);
+  return /\.(?:c|cc|cpp|cxx|h|hpp|mlir|ll|mir|s|dot|svg|txt|json)$/i.test(path);
 }
 
 function openWorkspaceFile(path = elements.fileSelect.value) {
@@ -296,7 +320,10 @@ function run(command) {
     activeLogCapture = null;
     if (capturedLog) appendLog(capturedLog);
   }
-  if (code !== 0) throw new Error(`Command failed with exit code ${code}`);
+  if (code !== 0) {
+    const detail = capturedLog?.trim();
+    throw new Error(detail || `Command failed with exit code ${code}`);
+  }
   return captured;
 }
 
@@ -328,11 +355,16 @@ function emitAssembly() {
 
 async function compileSelectedOutput() {
   if (busy) return;
-  const stage = activeTab === "wasm" || activeTab === "files" ? "ir" : activeTab;
+  let stage = activeTab === "wasm" || activeTab === "files" ? "ir" : activeTab;
+  if (elements.language.value === "mlir") stage = "mlir";
   setBusy(true, `Compiling ${stage === "cfg" ? "control-flow graph" : stage}…`);
   try {
     const settings = writeSource();
-    if (stage === "ast") {
+    if (settings.mlir) {
+      removeIfPresent("/workspace/optimized.mlir");
+      run("mlir-opt --pass-pipeline=builtin.module(canonicalize,cse) /workspace/input.mlir -o /workspace/optimized.mlir");
+      outputs.mlir = readText("/workspace/optimized.mlir");
+    } else if (stage === "ast") {
       if (settings.llvmIr) throw new Error("Clang AST is not applicable to LLVM IR input");
       outputs.ast = run(commandText(settings, "ast"));
     } else {
@@ -346,6 +378,10 @@ async function compileSelectedOutput() {
     setStatus("Compiler ready");
   } catch (error) {
     appendLog(error.message, "err");
+    if (elements.language.value === "mlir") {
+      outputs.mlir = error.stack || error.message;
+      switchTab("mlir");
+    }
     setStatus("Compilation failed", "error");
   } finally {
     setBusy(false);
@@ -492,6 +528,10 @@ async function loadExistingWasm() {
 
 async function compileAndRun() {
   if (busy) return;
+  if (elements.language.value === "mlir") {
+    setStatus("Use Compile or the advanced mlir-opt pipeline for MLIR input", "error");
+    return;
+  }
   setBusy(true, "Building a dynamically loadable Wasm module…");
   elements.result.textContent = "";
   try {
@@ -588,8 +628,17 @@ function resetSource() {
 
 function updateLanguageUi() {
   const isLlvmIr = elements.language.value === "llvm";
+  const isMlir = elements.language.value === "mlir";
   const astTab = document.querySelector('[data-tab="ast"]');
-  astTab.disabled = isLlvmIr;
+  const mlirTab = document.querySelector('[data-tab="mlir"]');
+  astTab.disabled = isLlvmIr || isMlir;
+  mlirTab.disabled = !isMlir;
+  elements.compileRun.disabled = !compiler || busy || isMlir;
+  elements.compileRun.title = isMlir
+    ? "MLIR execution requires an explicit lowering and execution pipeline"
+    : "Compile, link, load and execute WebAssembly";
+  if (isMlir && activeTab !== "mlir") switchTab("mlir");
+  if (!isMlir && activeTab === "mlir") switchTab("ir");
   if (isLlvmIr && activeTab === "ast") switchTab("ir");
 }
 
@@ -779,13 +828,19 @@ function wireUi() {
 
 async function loadCompiler() {
   try {
-    setStatus("Downloading Clang and LLVM…", "loading");
+    setStatus("Downloading MLIR, Clang and LLVM…", "loading");
     const { default: createCompiler } = await import("./Compiler.js");
     compiler = await createCompiler({
       locateFile: (path) => new URL(path, import.meta.url).href,
       print: (line) => appendLog(line),
       printErr: (line) => appendLog(line, "err"),
       setStatus: (text) => { if (text) setStatus(text, "loading"); },
+    });
+    setStatus("Preparing the MLIR optimizer…", "loading");
+    await compiler.loadDynamicLibrary("/lib/WasmBoltMlirOpt.so", {
+      loadAsync: true,
+      global: false,
+      nodelete: true,
     });
     compiler.FS.mkdirTree("/workspace");
     compiler.FS.chdir("/workspace");
@@ -862,7 +917,7 @@ if (startupParameters.get("autorun"))
   resetSource();
 else
   restoreState();
-if (["c", "cpp", "llvm"].includes(requestedLanguage)) {
+if (["c", "cpp", "mlir", "llvm"].includes(requestedLanguage)) {
   elements.language.value = requestedLanguage;
   resetSource();
 }
