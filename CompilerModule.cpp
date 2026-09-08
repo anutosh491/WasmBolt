@@ -376,8 +376,6 @@ void *loadSymbol(const char *ModulePath, const char *Symbol) {
 
   void *&Handle = LoadedModules[ModulePath];
   if (Handle == nullptr) {
-    llvm::outs() << "loading " << ModulePath << " with dlopen\n";
-    llvm::outs().flush();
     Handle = dlopen(ModulePath, RTLD_NOW | RTLD_GLOBAL);
     if (Handle == nullptr) {
       llvm::errs() << "dlopen failed: " << dlerror() << '\n';
@@ -454,8 +452,6 @@ load_and_call_numeric(const char *ModulePath, const char *Symbol,
   if (!Address)
     return std::numeric_limits<double>::quiet_NaN();
 
-  llvm::outs() << "executing " << Symbol << '\n';
-  llvm::outs().flush();
   switch (Signature) {
   case 0:
     return reinterpret_cast<std::int32_t (*)()>(Address)();

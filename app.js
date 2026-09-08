@@ -150,6 +150,20 @@ function appendLog(line, kind = "out") {
   if (terminal) terminal.scrollTop = terminal.scrollHeight;
 }
 
+function capturedStreamText(chunks) {
+  let result = "";
+  let previous = "";
+  for (const chunk of chunks) {
+    const current = String(chunk ?? "");
+    const addition = previous && current.startsWith(previous)
+      ? current.slice(previous.length)
+      : current;
+    if (addition) result += `${result ? "\n" : ""}${addition}`;
+    previous = current;
+  }
+  return result;
+}
+
 function setStatus(text, state = "ready") {
   elements.status.textContent = text;
   elements.statusDot.className = `status-dot ${state === "ready" ? "" : state}`;
@@ -540,7 +554,8 @@ async function inspectWasm(path) {
     option.textContent = displayFunctionExport(name);
     elements.symbol.append(option);
   }
-  const preferred = functions.find((name) => name === "square_plus_one") || functions[0];
+  const preferred = functions.find((name) => name === "main") ||
+    functions.find((name) => name === "square_plus_one") || functions[0];
   if (preferred) elements.symbol.value = preferred;
 
   outputs.wasm = [
@@ -629,20 +644,26 @@ function updateSignatureInputs(argumentsCount = 0) {
 
 function executeSymbol() {
   if (!currentModulePath || !elements.symbol.value || !selectedSignature) return;
-  const { code: signature, argumentsCount } = selectedSignature;
+  const { code: signature, argumentsCount, entryPoint } = selectedSignature;
   const a = Number(elements.argA.value || 0);
   const b = Number(elements.argB.value || 0);
-  const result = callSelectedSymbol(signature, a, b);
-  elements.result.textContent = Number.isNaN(result) ? "Execution failed" : `Result: ${result}`;
-  outputs.wasm = `${outputs.wasm.replace(/\n\nExecution result:[\s\S]*$/, "")}\n\nExecution result:\n  ${displayFunctionExport(elements.symbol.value)}(${[a, b].slice(0, argumentsCount).join(", ")}) = ${result}`;
+  const result = callSelectedSymbol(signature, entryPoint ? 0 : a, entryPoint ? 0 : b);
+  elements.result.textContent = entryPoint
+    ? ""
+    : Number.isNaN(result) ? "Execution failed" : `Result: ${result}`;
+  outputs.wasm = outputs.wasm.replace(/\n\nExecution result:[\s\S]*$/, "");
+  if (!entryPoint)
+    outputs.wasm += `\n\nExecution result:\n  ${displayFunctionExport(elements.symbol.value)}(${[a, b].slice(0, argumentsCount).join(", ")}) = ${result}`;
   if (activeTab === "wasm") elements.output.textContent = outputs.wasm;
-  appendLog(`=> ${elements.symbol.value} returned ${result}`);
 }
 
 function callSelectedSymbol(signature, a, b) {
   activeCapture = [];
   activeLogCapture = [];
-  let capturedLog;
+  activeStdoutCapture = [];
+  activeStderrCapture = [];
+  let capturedStdout;
+  let capturedStderr;
   try {
     return compiler.ccall(
       "load_and_call_numeric",
@@ -651,10 +672,14 @@ function callSelectedSymbol(signature, a, b) {
       [currentModulePath, elements.symbol.value, signature, a, b],
     );
   } finally {
-    capturedLog = activeLogCapture.join("\n");
+    capturedStdout = capturedStreamText(activeStdoutCapture);
+    capturedStderr = capturedStreamText(activeStderrCapture);
     activeCapture = null;
     activeLogCapture = null;
-    if (capturedLog) appendLog(capturedLog);
+    activeStdoutCapture = null;
+    activeStderrCapture = null;
+    if (capturedStdout) appendLog(capturedStdout);
+    if (capturedStderr) appendLog(capturedStderr, "err");
   }
 }
 
@@ -670,10 +695,17 @@ function configureSelectedSymbol() {
     ["void()", { code: 6, argumentsCount: 0 }],
   ]);
   const detected = wasmExportSignatures.get(name);
-  selectedSignature = callableSignatures.get(detected) || null;
+  const entryPoint = name === "main" && detected === "i32(i32, i32)";
+  const callable = callableSignatures.get(detected);
+  selectedSignature = callable
+    ? { ...callable, argumentsCount: entryPoint ? 0 : callable.argumentsCount, entryPoint }
+    : null;
   elements.signature.textContent = detected || "unavailable";
-  elements.signature.title = detected ? "Read from the Wasm type section" : "No Wasm function type was found";
+  elements.signature.title = entryPoint
+    ? "Emscripten lowers main to the argc/argv WebAssembly entry-point ABI"
+    : detected ? "Read from the Wasm type section" : "No Wasm function type was found";
   elements.execute.disabled = !selectedSignature;
+  elements.execute.textContent = entryPoint ? "Run" : "Run export";
   elements.result.textContent = detected && !selectedSignature
     ? `Execution is not yet supported for ${detected}`
     : "";
