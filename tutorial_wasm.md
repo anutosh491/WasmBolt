@@ -65,7 +65,7 @@ llc -mtriple=wasm32-unknown-emscripten -O2 -filetype=obj -relocation-model=pic /
 ```
 
 ```bash
-wasm-ld -shared --import-memory --experimental-pic --unresolved-symbols=import-dynamic --export-all --export=__wasm_call_ctors --export-if-defined=__wasm_apply_data_relocs --no-gc-sections /workspace/cpp-output.o -o /workspace/cpp-output.wasm
+wasm-ld -shared --export-all --unresolved-symbols=import-dynamic /workspace/cpp-output.o -o /workspace/cpp-output.wasm
 ```
 
 Select `cpp-output.wasm`, choose **Load selected .wasm**, and execute
@@ -118,7 +118,7 @@ llc -mtriple=wasm32-unknown-emscripten -O2 -filetype=obj -relocation-model=pic /
 ```
 
 ```bash
-wasm-ld -shared --import-memory --experimental-pic --unresolved-symbols=import-dynamic --export-all --export=__wasm_call_ctors --export-if-defined=__wasm_apply_data_relocs --no-gc-sections /workspace/llvm-output.o -o /workspace/llvm-output.wasm
+wasm-ld -shared --export-all --unresolved-symbols=import-dynamic /workspace/llvm-output.o -o /workspace/llvm-output.wasm
 ```
 
 Load `llvm-output.wasm` and execute `absolute_difference(5, 4)`. The expected
@@ -154,7 +154,7 @@ llc -mtriple=wasm32-unknown-emscripten -O2 -filetype=obj -relocation-model=pic /
 ```
 
 ```bash
-wasm-ld -shared --import-memory --experimental-pic --unresolved-symbols=import-dynamic --export-all --export=__wasm_call_ctors --export-if-defined=__wasm_apply_data_relocs --no-gc-sections /workspace/boost.o -o /workspace/boost.wasm
+wasm-ld -shared --export-all --unresolved-symbols=import-dynamic /workspace/boost.o -o /workspace/boost.wasm
 ```
 
 Load `boost.wasm` and execute the discovered `f64()` export. The expected
@@ -197,7 +197,7 @@ llc -mtriple=wasm32-unknown-emscripten -O2 -filetype=obj -relocation-model=pic /
 ```
 
 ```bash
-wasm-ld -shared --import-memory --experimental-pic --unresolved-symbols=import-dynamic --export-all --export=__wasm_call_ctors --export-if-defined=__wasm_apply_data_relocs --no-gc-sections -L/lib -lsymengine /workspace/symengine.o -o /workspace/symengine.wasm
+wasm-ld -shared --export-all --unresolved-symbols=import-dynamic -L/lib -lsymengine /workspace/symengine.o -o /workspace/symengine.wasm
 ```
 
 Load `symengine.wasm`, select the detected `i32(i32)` export, and run it with

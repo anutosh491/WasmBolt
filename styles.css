@@ -56,7 +56,6 @@ select, input { height: 34px; padding: 0 9px; }
 .pane-title { min-height: 42px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 10px; border-bottom: 1px solid var(--border); background: var(--panel-2); }
 .pane-title strong { display: block; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
 .eyebrow { display: block; color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .1em; }
-.local-badge { color: var(--green); border: 1px solid #275947; background: #12281f; padding: 3px 7px; border-radius: 999px; font-size: 10px; }
 .source-actions { display: flex; align-items: center; gap: 6px; }
 .source-pane { grid-column: 1; grid-row: 1; }
 .output-pane { grid-column: 3; grid-row: 1; }
@@ -80,6 +79,7 @@ textarea { flex: 1; width: 100%; resize: none; border: 0; outline: 0; padding: 1
 .runner { flex: 0 0 auto; display: flex; align-items: end; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--border); background: var(--panel-2); overflow-x: auto; }
 .runner label { min-width: 118px; }
 .runner output { min-width: 120px; color: var(--green); font-family: ui-monospace, monospace; font-weight: 700; padding: 8px; }
+.runner .signature-output { display: block; min-width: 110px; padding: 8px 9px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel); color: var(--text); font-weight: 400; }
 .judge { display: grid; grid-template-columns: minmax(240px, 1fr) auto minmax(130px, auto); align-items: end; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--border); background: #10151d; }
 .judge label { display: grid; gap: 4px; }
 .judge label span { color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }

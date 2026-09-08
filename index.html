@@ -70,7 +70,6 @@
           <div class="source-actions">
             <button id="clear-source" class="quiet">Clear</button>
             <button id="reset-source" class="quiet">Reset</button>
-            <span class="local-badge">runs locally</span>
           </div>
         </div>
         <textarea id="source" spellcheck="false" aria-label="Source code"></textarea>
@@ -103,7 +102,6 @@
             <span>Browser filesystem</span>
             <select id="file-select"></select>
           </label>
-          <button id="open-file">Open</button>
           <button id="download-file" class="quiet">Download</button>
         </div>
 
@@ -118,15 +116,7 @@
             <label><span>Export</span><select id="symbol"></select></label>
             <label>
               <span>Detected signature</span>
-              <select id="signature">
-                <option value="1">i32(i32)</option>
-                <option value="2">i32(i32, i32)</option>
-                <option value="0">i32()</option>
-                <option value="4">f64(f64)</option>
-                <option value="5">f64(f64, f64)</option>
-                <option value="3">f64()</option>
-                <option value="6">void()</option>
-              </select>
+              <output id="signature" class="signature-output"></output>
             </label>
             <label id="arg-a-wrap"><span>Argument 1</span><input id="arg-a" type="number" value="5" step="any" /></label>
             <label id="arg-b-wrap" class="hidden"><span>Argument 2</span><input id="arg-b" type="number" value="4" step="any" /></label>
