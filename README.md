@@ -79,6 +79,10 @@ The linker does not infer binary libraries from included headers. A deployment
 can add any compatible Emscripten package and users can provide its normal link
 flags in their `wasm-ld` command, just as they would to a native linker.
 
+To keep first use responsive, WasmBolt loads the Clang/LLVM/LLD core first and
+warms the MLIR driver in the background. MLIR remains enabled by default: the
+normal MLIR **Compile** action transparently waits for that driver if necessary.
+
 ## Why this is different
 
 [wasm-clang](https://github.com/binji/wasm-clang) pioneered running separate

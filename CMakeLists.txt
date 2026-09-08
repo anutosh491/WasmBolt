@@ -112,7 +112,11 @@ file(REMOVE_RECURSE
   "${RUNTIME_ROOT}/include/llvm-c"
   "${RUNTIME_ROOT}/include/clang"
   "${RUNTIME_ROOT}/include/clang-c"
-  "${RUNTIME_ROOT}/include/lld")
+  "${RUNTIME_ROOT}/include/lld"
+  # mlir-opt is provided as a compiled side module. Its development headers
+  # are not required by the driver and add more than 100 MB to the preload.
+  "${RUNTIME_ROOT}/include/mlir"
+  "${RUNTIME_ROOT}/include/mlir-c")
 
 file(GLOB RUNTIME_LIBRARY_CANDIDATES
   "${CMAKE_PREFIX_PATH}/lib/*.so*"
@@ -137,7 +141,6 @@ target_link_options(Compiler PRIVATE
   "SHELL:--preload-file=${RUNTIME_ROOT}/include@/include"
   "SHELL:--preload-file=${RUNTIME_ROOT}/lib@/lib"
   "SHELL:--preload-file=${CLANG_RESOURCE_TREE}@${CLANG_RESOURCE_DIR}"
-  "SHELL:--preload-file=${CMAKE_CURRENT_BINARY_DIR}/WasmBoltMlirOpt.so@/lib/WasmBoltMlirOpt.so"
 )
 
 foreach(FILE index.html app.js styles.css)

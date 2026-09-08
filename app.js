@@ -106,6 +106,35 @@ let buildNumber = 0;
 let busy = false;
 let cfgObjectUrl = "";
 let wasmExportSignatures = new Map();
+let mlirDriverPromise = null;
+let mlirDriverReady = false;
+
+async function ensureMlirDriver({ background = false } = {}) {
+  if (!background && !mlirDriverReady)
+    setStatus("Preparing the MLIR optimizer…", "loading");
+  if (!mlirDriverPromise) {
+    mlirDriverPromise = (async () => {
+      const response = await fetch(new URL("./WasmBoltMlirOpt.so", import.meta.url));
+      if (!response.ok)
+        throw new Error(`Unable to download the MLIR optimizer (${response.status})`);
+      compiler.FS.mkdirTree("/lib");
+      compiler.FS.writeFile(
+        "/lib/WasmBoltMlirOpt.so",
+        new Uint8Array(await response.arrayBuffer()),
+      );
+      await compiler.loadDynamicLibrary("/lib/WasmBoltMlirOpt.so", {
+        loadAsync: true,
+        global: false,
+        nodelete: true,
+      });
+      mlirDriverReady = true;
+    })().catch((error) => {
+      mlirDriverPromise = null;
+      throw error;
+    });
+  }
+  await mlirDriverPromise;
+}
 
 function appendLog(line, kind = "out") {
   const text = String(line ?? "");
@@ -392,6 +421,7 @@ async function compileSelectedOutput() {
   try {
     const settings = writeSource();
     if (settings.mlir) {
+      await ensureMlirDriver();
       removeIfPresent("/workspace/optimized.mlir");
       run("mlir-opt --pass-pipeline=builtin.module(canonicalize,cse) /workspace/input.mlir -o /workspace/optimized.mlir");
       outputs.mlir = readText("/workspace/optimized.mlir");
@@ -814,7 +844,7 @@ function wireUi() {
   $("#clear-log").addEventListener("click", () => { elements.log.textContent = ""; });
   $("#copy-output").addEventListener("click", () => navigator.clipboard.writeText(elements.output.textContent));
   $("#share").addEventListener("click", shareState);
-  elements.runCommand.addEventListener("click", () => {
+  elements.runCommand.addEventListener("click", async () => {
     if (!elements.command.value.trim() || busy) return;
     const command = elements.command.value.trim();
     elements.command.value = "";
@@ -824,6 +854,8 @@ function wireUi() {
       // command works immediately after a fresh page load.
       writeSource();
       const parsed = parseCommandRedirections(command);
+      if (/^mlir-opt(?:\s|$)/.test(parsed.command))
+        await ensureMlirDriver();
       const captured = run(parsed.command, parsed.redirects);
       const outputPath = parsed.redirects.stderr ||
         commandOutputPath(parsed.command);
@@ -861,19 +893,13 @@ function wireUi() {
 
 async function loadCompiler() {
   try {
-    setStatus("Downloading MLIR, Clang and LLVM…", "loading");
+    setStatus("Downloading Clang and LLVM…", "loading");
     const { default: createCompiler } = await import("./Compiler.js");
     compiler = await createCompiler({
       locateFile: (path) => new URL(path, import.meta.url).href,
       print: (line) => appendLog(line),
       printErr: (line) => appendLog(line, "err"),
       setStatus: (text) => { if (text) setStatus(text, "loading"); },
-    });
-    setStatus("Preparing the MLIR optimizer…", "loading");
-    await compiler.loadDynamicLibrary("/lib/WasmBoltMlirOpt.so", {
-      loadAsync: true,
-      global: false,
-      nodelete: true,
     });
     compiler.FS.mkdirTree("/workspace");
     compiler.FS.chdir("/workspace");
@@ -938,6 +964,15 @@ async function loadCompiler() {
           elements.result.textContent === (llvmIrInput ? "Result: 1" : "Result: 60"))
         document.body.dataset.smokeTest = "passed";
     }
+
+    // MLIR is always available, but its large driver should not delay the
+    // first Clang/LLVM interaction. Warm it transparently once the browser is
+    // otherwise idle; a foreground MLIR command awaits the same promise.
+    const warmMlir = () => ensureMlirDriver({ background: true }).catch(() => {});
+    if ("requestIdleCallback" in window)
+      window.requestIdleCallback(warmMlir, { timeout: 5000 });
+    else
+      window.setTimeout(warmMlir, 1000);
   } catch (error) {
     appendLog(error.stack || error.message, "err");
     setStatus("Compiler failed to load", "error");
