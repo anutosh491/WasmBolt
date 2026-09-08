@@ -19,7 +19,6 @@ const elements = {
   loadWasm: $("#load-wasm"),
   fileBrowser: $("#file-browser"),
   fileSelect: $("#file-select"),
-  openFile: $("#open-file"),
   downloadFile: $("#download-file"),
   runner: $("#runner"),
   symbol: $("#symbol"),
@@ -106,6 +105,7 @@ let buildNumber = 0;
 let busy = false;
 let cfgObjectUrl = "";
 let wasmExportSignatures = new Map();
+let selectedSignature = null;
 let mlirDriverPromise = null;
 let mlirDriverReady = false;
 
@@ -606,10 +606,8 @@ async function compileAndRun() {
 
     currentModulePath = `/workspace/program-${++buildNumber}.wasm`;
     const link = [
-      "wasm-ld", "-shared", "--import-memory", "--experimental-pic",
-      "--unresolved-symbols=import-dynamic", "--export-all",
-      "--export=__wasm_call_ctors", "--export-if-defined=__wasm_apply_data_relocs",
-      "--no-gc-sections", "/workspace/program.o",
+      "wasm-ld", "-shared", "--export-all",
+      "--unresolved-symbols=import-dynamic", "/workspace/program.o",
       "-o", currentModulePath,
     ].filter(Boolean).join(" ");
     run(link);
@@ -624,21 +622,19 @@ async function compileAndRun() {
   }
 }
 
-function updateSignatureInputs() {
-  const signature = Number(elements.signature.value);
-  const argumentsCount = [0, 3, 6].includes(signature) ? 0 : [1, 4].includes(signature) ? 1 : 2;
+function updateSignatureInputs(argumentsCount = 0) {
   elements.argAWrap.classList.toggle("hidden", argumentsCount < 1);
   elements.argBWrap.classList.toggle("hidden", argumentsCount < 2);
 }
 
 function executeSymbol() {
-  if (!currentModulePath || !elements.symbol.value) return;
-  const signature = Number(elements.signature.value);
+  if (!currentModulePath || !elements.symbol.value || !selectedSignature) return;
+  const { code: signature, argumentsCount } = selectedSignature;
   const a = Number(elements.argA.value || 0);
   const b = Number(elements.argB.value || 0);
   const result = callSelectedSymbol(signature, a, b);
   elements.result.textContent = Number.isNaN(result) ? "Execution failed" : `Result: ${result}`;
-  outputs.wasm = `${outputs.wasm.replace(/\n\nExecution result:[\s\S]*$/, "")}\n\nExecution result:\n  ${displayFunctionExport(elements.symbol.value)}(${[a, b].slice(0, [0, 3, 6].includes(signature) ? 0 : [1, 4].includes(signature) ? 1 : 2).join(", ")}) = ${result}`;
+  outputs.wasm = `${outputs.wasm.replace(/\n\nExecution result:[\s\S]*$/, "")}\n\nExecution result:\n  ${displayFunctionExport(elements.symbol.value)}(${[a, b].slice(0, argumentsCount).join(", ")}) = ${result}`;
   if (activeTab === "wasm") elements.output.textContent = outputs.wasm;
   appendLog(`=> ${elements.symbol.value} returned ${result}`);
 }
@@ -664,15 +660,24 @@ function callSelectedSymbol(signature, a, b) {
 
 function configureSelectedSymbol() {
   const name = elements.symbol.value;
-  const signatureCodes = new Map([
-    ["i32()", "0"], ["i32(i32)", "1"], ["i32(i32, i32)", "2"],
-    ["f64()", "3"], ["f64(f64)", "4"], ["f64(f64, f64)", "5"], ["void()", "6"],
+  const callableSignatures = new Map([
+    ["i32()", { code: 0, argumentsCount: 0 }],
+    ["i32(i32)", { code: 1, argumentsCount: 1 }],
+    ["i32(i32, i32)", { code: 2, argumentsCount: 2 }],
+    ["f64()", { code: 3, argumentsCount: 0 }],
+    ["f64(f64)", { code: 4, argumentsCount: 1 }],
+    ["f64(f64, f64)", { code: 5, argumentsCount: 2 }],
+    ["void()", { code: 6, argumentsCount: 0 }],
   ]);
   const detected = wasmExportSignatures.get(name);
-  const code = signatureCodes.get(detected);
-  if (code) elements.signature.value = code;
-  elements.signature.title = detected ? `Read from the Wasm type section: ${detected}` : "Choose a signature manually";
-  updateSignatureInputs();
+  selectedSignature = callableSignatures.get(detected) || null;
+  elements.signature.textContent = detected || "unavailable";
+  elements.signature.title = detected ? "Read from the Wasm type section" : "No Wasm function type was found";
+  elements.execute.disabled = !selectedSignature;
+  elements.result.textContent = detected && !selectedSignature
+    ? `Execution is not yet supported for ${detected}`
+    : "";
+  updateSignatureInputs(selectedSignature?.argumentsCount || 0);
 }
 
 function resetSource() {
@@ -681,6 +686,7 @@ function resetSource() {
   elements.filename.textContent = languageSettings().label;
   currentModulePath = "";
   wasmExportSignatures = new Map();
+  selectedSignature = null;
   elements.runner.classList.add("hidden");
   elements.result.textContent = "";
   saveState();
@@ -824,11 +830,9 @@ function wireUi() {
   elements.compileRun.addEventListener("click", compileAndRun);
   elements.loadWasm.addEventListener("click", loadExistingWasm);
   elements.execute.addEventListener("click", executeSymbol);
-  elements.openFile.addEventListener("click", () => openWorkspaceFile());
   elements.downloadFile.addEventListener("click", downloadWorkspaceFile);
   elements.fileSelect.addEventListener("change", () => openWorkspaceFile());
   elements.symbol.addEventListener("change", configureSelectedSymbol);
-  elements.signature.addEventListener("change", updateSignatureInputs);
   elements.language.addEventListener("change", resetSource);
   elements.source.addEventListener("input", () => {
     currentModulePath = "";
@@ -887,7 +891,7 @@ function wireUi() {
     }
   });
   configureResizers();
-  updateSignatureInputs();
+  updateSignatureInputs(0);
   updateLanguageUi();
 }
 
