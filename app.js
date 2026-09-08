@@ -28,7 +28,6 @@ const elements = {
   argAWrap: $("#arg-a-wrap"),
   argBWrap: $("#arg-b-wrap"),
   execute: $("#execute"),
-  result: $("#result"),
   command: $("#command"),
   runCommand: $("#run-command"),
 };
@@ -106,6 +105,7 @@ let busy = false;
 let cfgObjectUrl = "";
 let wasmExportSignatures = new Map();
 let selectedSignature = null;
+let lastExecutionResult = null;
 let mlirDriverPromise = null;
 let mlirDriverReady = false;
 
@@ -590,7 +590,7 @@ async function loadExistingWasm() {
     return;
   }
   setBusy(true, `Loading ${path.split("/").pop()}…`);
-  elements.result.textContent = "";
+  lastExecutionResult = null;
   try {
     await activateWasm(path);
   } catch (error) {
@@ -609,7 +609,7 @@ async function compileAndRun() {
     return;
   }
   setBusy(true, "Building a dynamically loadable Wasm module…");
-  elements.result.textContent = "";
+  lastExecutionResult = null;
   try {
     const settings = writeSource();
     removeIfPresent("/workspace/program.o");
@@ -647,14 +647,13 @@ function executeSymbol() {
   const { code: signature, argumentsCount, entryPoint } = selectedSignature;
   const a = Number(elements.argA.value || 0);
   const b = Number(elements.argB.value || 0);
+  const arguments_ = entryPoint ? [] : [a, b].slice(0, argumentsCount);
+  const displayName = displayFunctionExport(elements.symbol.value).replace(/ \(C\+\+:.*\)$/, "");
+  appendLog(`wasmbolt % ${displayName}(${arguments_.join(", ")})`);
   const result = callSelectedSymbol(signature, entryPoint ? 0 : a, entryPoint ? 0 : b);
-  elements.result.textContent = entryPoint
-    ? ""
-    : Number.isNaN(result) ? "Execution failed" : `Result: ${result}`;
-  outputs.wasm = outputs.wasm.replace(/\n\nExecution result:[\s\S]*$/, "");
+  lastExecutionResult = result;
   if (!entryPoint)
-    outputs.wasm += `\n\nExecution result:\n  ${displayFunctionExport(elements.symbol.value)}(${[a, b].slice(0, argumentsCount).join(", ")}) = ${result}`;
-  if (activeTab === "wasm") elements.output.textContent = outputs.wasm;
+    appendLog(Number.isNaN(result) ? "Execution failed" : String(result), Number.isNaN(result) ? "err" : "out");
 }
 
 function callSelectedSymbol(signature, a, b) {
@@ -705,8 +704,7 @@ function configureSelectedSymbol() {
     ? "Emscripten lowers main to the argc/argv WebAssembly entry-point ABI"
     : detected ? "Read from the Wasm type section" : "No Wasm function type was found";
   elements.execute.disabled = !selectedSignature;
-  elements.execute.textContent = entryPoint ? "Run" : "Run export";
-  elements.result.textContent = detected && !selectedSignature
+  elements.execute.title = detected && !selectedSignature
     ? `Execution is not yet supported for ${detected}`
     : "";
   updateSignatureInputs(selectedSignature?.argumentsCount || 0);
@@ -719,8 +717,8 @@ function resetSource() {
   currentModulePath = "";
   wasmExportSignatures = new Map();
   selectedSignature = null;
+  lastExecutionResult = null;
   elements.runner.classList.add("hidden");
-  elements.result.textContent = "";
   saveState();
   updateLanguageUi();
 }
@@ -869,8 +867,8 @@ function wireUi() {
   elements.source.addEventListener("input", () => {
     currentModulePath = "";
     wasmExportSignatures = new Map();
+    lastExecutionResult = null;
     elements.runner.classList.add("hidden");
-    elements.result.textContent = "";
     saveState();
   });
   $("#clear-source").addEventListener("click", () => { elements.source.value = ""; elements.source.dispatchEvent(new Event("input")); elements.source.focus(); });
@@ -997,7 +995,7 @@ async function loadCompiler() {
           elements.cfgImage.dataset.ready === "true" &&
           outputs.assembly.length > 0 &&
           (!llvmIrInput || selectionDag.includes("name:            absolute_difference")) &&
-          elements.result.textContent === (llvmIrInput ? "Result: 1" : "Result: 60"))
+          lastExecutionResult === (llvmIrInput ? 1 : 60))
         document.body.dataset.smokeTest = "passed";
     }
 
