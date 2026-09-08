@@ -65,7 +65,19 @@ jobs:
           test -s site/Compiler.js
           test -s site/Compiler.wasm
           test -s site/Compiler.data
+          test -s site/WasmBoltMlirOpt.so
           grep -q 'WasmBolt' site/index.html
+          du -h site/Compiler.js site/Compiler.wasm site/Compiler.data \
+            site/WasmBoltMlirOpt.so
+          core_data_size="$(stat -c '%s' site/Compiler.data)"
+          if (( core_data_size > 50 * 1024 * 1024 )); then
+            echo "Compiler.data exceeded the 50 MiB core-runtime budget" >&2
+            exit 1
+          fi
+          if grep -q 'WasmBoltMlirOpt.so' site/Compiler.js; then
+            echo "The MLIR driver was accidentally added back to the core preload" >&2
+            exit 1
+          fi
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
