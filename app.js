@@ -260,6 +260,46 @@ function workspaceFiles() {
     .sort();
 }
 
+function isLlvmUtilityCommand(command) {
+  return /^(?:llvm-readobj|llvm-nm|llvm-size|llvm-cxxfilt)(?:\s|$)/.test(command);
+}
+
+function runLlvmUtility(command) {
+  appendLog("");
+  appendLog(`$ ${command}`);
+
+  const files = workspaceFiles().map((path) => {
+    const bytes = compiler.FS.readFile(path).slice();
+    return { path, data: bytes.buffer };
+  });
+  const transfers = files.map((file) => file.data);
+
+  return new Promise((resolve, reject) => {
+    const worker = new Worker("./llvm-utility-worker.js", { type: "module" });
+    const finish = () => worker.terminate();
+
+    worker.onerror = (event) => {
+      finish();
+      reject(new Error(event.message || "LLVM utility Worker failed"));
+    };
+    worker.onmessage = ({ data }) => {
+      finish();
+      for (const line of data.stdout) appendLog(line);
+      for (const line of data.stderr) appendLog(line, "err");
+      if (!data.ok) {
+        reject(new Error(
+          data.stderr.at(-1) || data.error ||
+            `Command failed with exit code ${data.status}`,
+        ));
+        return;
+      }
+      resolve(data.stdout.join("\n"));
+    };
+
+    worker.postMessage({ id: 1, command, files }, transfers);
+  });
+}
+
 function refreshWorkspaceFiles(preferred = "") {
   const files = workspaceFiles();
   const previous = preferred || elements.fileSelect.value;
@@ -890,7 +930,9 @@ function wireUi() {
       const parsed = parseCommandRedirections(command);
       if (/^mlir-opt(?:\s|$)/.test(parsed.command))
         await ensureMlirDriver();
-      const captured = run(parsed.command, parsed.redirects);
+      const captured = isLlvmUtilityCommand(parsed.command)
+        ? await runLlvmUtility(parsed.command)
+        : run(parsed.command, parsed.redirects);
       const outputPath = parsed.redirects.stderr ||
         commandOutputPath(parsed.command);
       refreshWorkspaceFiles(outputPath);

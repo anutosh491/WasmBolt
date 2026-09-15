@@ -34,3 +34,6 @@ cp index.html app.js styles.css tutorials.md tutorial_mlir.md tutorial_wasm.md \
   tutorial_aarch64.md tutorial_x86.md site/
 cp build/Compiler.js build/Compiler.wasm build/Compiler.data \
   build/WasmBoltMlirOpt.so site/
+cp "${LLVM_WASM_PREFIX}/bin/llvm.js" \
+  "${LLVM_WASM_PREFIX}/bin/llvm.wasm" \
+  llvm-utility-worker.js site/

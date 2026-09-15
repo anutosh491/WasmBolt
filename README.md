@@ -29,6 +29,8 @@ C / C++ source
 - LLVM `dot-cfg` output rendered to SVG by Graphviz in-process;
 - in-process `llc`-style assembly and object emission;
 - in-process `wasm-ld` linking;
+- `llvm-readobj`, `llvm-nm`, `llvm-size` and `llvm-cxxfilt` through LLVM's
+  multicall driver in short-lived Web Workers;
 - C++ dependencies supplied by the deployment's Emscripten prefix, with
   explicit include and link flags controlled by the user;
 - automatic discovery of public functions and their scalar signatures from the
@@ -71,9 +73,10 @@ The primary interface has only **Compile** and **Compile & Run**. Select an
 output tab before choosing **Compile** to produce that representation.
 **Compile & Run** emits a Wasm object, links and loads the side module, detects
 the exported function signature, and executes it. Open **Advanced terminal**
-for complete manual control: raw `clang`, `mlir-opt`, `opt`, `llc`, `dot`, and `wasm-ld`
-commands, generated files, loading an existing `.wasm`, manual export calls,
-and analysis output. The terminal adds no implicit optimization or link flags.
+for complete manual control: raw `clang`, `mlir-opt`, `opt`, `llc`, `dot`,
+`wasm-ld`, `llvm-readobj`, `llvm-nm`, `llvm-size` and `llvm-cxxfilt` commands,
+generated files, loading an existing `.wasm`, manual export calls, and analysis
+output. The terminal adds no implicit optimization or link flags.
 
 The linker does not infer binary libraries from included headers. A deployment
 can add any compatible Emscripten package and users can provide its normal link
