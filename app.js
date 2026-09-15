@@ -260,8 +260,28 @@ function workspaceFiles() {
     .sort();
 }
 
+const llvmUtilityCommands = new Set([
+  "llvm-ar",
+  "llvm-bitcode-strip",
+  "llvm-c++filt",
+  "llvm-cxxfilt",
+  "llvm-dlltool",
+  "llvm-extract-bundle-entry",
+  "llvm-install-name-tool",
+  "llvm-lib",
+  "llvm-nm",
+  "llvm-objcopy",
+  "llvm-objdump",
+  "llvm-otool",
+  "llvm-ranlib",
+  "llvm-readelf",
+  "llvm-readobj",
+  "llvm-size",
+  "llvm-strip",
+]);
+
 function isLlvmUtilityCommand(command) {
-  return /^(?:llvm-readobj|llvm-nm|llvm-size|llvm-cxxfilt)(?:\s|$)/.test(command);
+  return llvmUtilityCommands.has(command.trim().match(/^\S+/)?.[0]);
 }
 
 function runLlvmUtility(command) {
@@ -284,6 +304,11 @@ function runLlvmUtility(command) {
     };
     worker.onmessage = ({ data }) => {
       finish();
+      for (const file of data.generatedFiles || []) {
+        const parent = file.path.slice(0, file.path.lastIndexOf("/")) || "/";
+        compiler.FS.mkdirTree(parent);
+        compiler.FS.writeFile(file.path, new Uint8Array(file.data));
+      }
       for (const line of data.stdout) appendLog(line);
       for (const line of data.stderr) appendLog(line, "err");
       if (!data.ok) {

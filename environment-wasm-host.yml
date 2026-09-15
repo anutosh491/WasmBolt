@@ -7,6 +7,6 @@ channels:
 
 dependencies:
   - llvm =23.1.0
-  - llvm-driver =23.1.0 =hd68d874_0
+  - llvm-driver =23.1.0 =hd68d874_1
   - mlir-python-bindings =23.1.0 =py313h1276dae_1
   - graphviz =15.*
