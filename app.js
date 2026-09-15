@@ -117,11 +117,19 @@ async function ensureMlirDriver({ background = false } = {}) {
       const response = await fetch(new URL("./WasmBoltMlirOpt.so", import.meta.url));
       if (!response.ok)
         throw new Error(`Unable to download the MLIR optimizer (${response.status})`);
+      const checksumResponse = await fetch(new URL("./WasmBoltMlirOpt.so.sha256", import.meta.url));
+      if (!checksumResponse.ok)
+        throw new Error(`Unable to download the MLIR optimizer checksum (${checksumResponse.status})`);
+      const expectedDigest = (await checksumResponse.text()).trim().toLowerCase();
+      const libraryBytes = new Uint8Array(await response.arrayBuffer());
+      const digestBuffer = await crypto.subtle.digest("SHA-256", libraryBytes);
+      const actualDigest = Array.from(new Uint8Array(digestBuffer))
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
+      if (actualDigest !== expectedDigest)
+        throw new Error("MLIR optimizer failed integrity verification");
       compiler.FS.mkdirTree("/lib");
-      compiler.FS.writeFile(
-        "/lib/WasmBoltMlirOpt.so",
-        new Uint8Array(await response.arrayBuffer()),
-      );
+      compiler.FS.writeFile("/lib/WasmBoltMlirOpt.so", libraryBytes);
       await compiler.loadDynamicLibrary("/lib/WasmBoltMlirOpt.so", {
         loadAsync: true,
         global: false,
