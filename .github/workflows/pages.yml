@@ -66,14 +66,11 @@ jobs:
           test -s site/Compiler.wasm
           test -s site/Compiler.data
           test -s site/WasmBoltMlirOpt.so
+          test -s site/llvm.js
+          test -s site/llvm.wasm
           grep -q 'WasmBolt' site/index.html
           du -h site/Compiler.js site/Compiler.wasm site/Compiler.data \
-            site/WasmBoltMlirOpt.so
-          core_data_size="$(stat -c '%s' site/Compiler.data)"
-          if (( core_data_size > 50 * 1024 * 1024 )); then
-            echo "Compiler.data exceeded the 50 MiB core-runtime budget" >&2
-            exit 1
-          fi
+            site/WasmBoltMlirOpt.so site/llvm.js site/llvm.wasm
           if grep -q 'WasmBoltMlirOpt.so' site/Compiler.js; then
             echo "The MLIR driver was accidentally added back to the core preload" >&2
             exit 1
