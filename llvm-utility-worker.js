@@ -1,11 +1,46 @@
 import createLLVM from "./llvm.js";
 
 const utilityNames = new Map([
-  ["llvm-readobj", "readobj"],
-  ["llvm-nm", "nm"],
-  ["llvm-size", "size"],
+  ["llvm-ar", "ar"],
+  ["llvm-bitcode-strip", "bitcode-strip"],
+  ["llvm-c++filt", "c++filt"],
   ["llvm-cxxfilt", "cxxfilt"],
+  ["llvm-dlltool", "dlltool"],
+  ["llvm-extract-bundle-entry", "extract-bundle-entry"],
+  ["llvm-install-name-tool", "install-name-tool"],
+  ["llvm-lib", "lib"],
+  ["llvm-nm", "nm"],
+  ["llvm-objcopy", "objcopy"],
+  ["llvm-objdump", "objdump"],
+  ["llvm-otool", "otool"],
+  ["llvm-ranlib", "ranlib"],
+  ["llvm-readelf", "readelf"],
+  ["llvm-readobj", "readobj"],
+  ["llvm-size", "size"],
+  ["llvm-strip", "strip"],
 ]);
+
+function fingerprint(bytes) {
+  let hash = 2166136261;
+  for (const byte of bytes) {
+    hash ^= byte;
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${bytes.byteLength}:${hash >>> 0}`;
+}
+
+function workspaceFiles(module, directory = "/workspace") {
+  const files = [];
+  for (const name of module.FS.readdir(directory)) {
+    if (name === "." || name === "..") continue;
+    const path = `${directory}/${name}`;
+    if (module.FS.isDir(module.FS.stat(path).mode))
+      files.push(...workspaceFiles(module, path));
+    else
+      files.push(path);
+  }
+  return files;
+}
 
 function tokenize(command) {
   const args = [];
@@ -44,12 +79,25 @@ self.onmessage = async ({ data }) => {
   const { id, command, files } = data;
   const stdout = [];
   const stderr = [];
+  const originalFiles = new Map();
+  let module;
   let responded = false;
 
   const respond = (message) => {
     if (responded) return;
     responded = true;
-    self.postMessage({ id, stdout, stderr, ...message });
+    const generatedFiles = [];
+    if (message.ok && module) {
+      for (const path of workspaceFiles(module)) {
+        const bytes = module.FS.readFile(path).slice();
+        if (originalFiles.get(path) === fingerprint(bytes)) continue;
+        generatedFiles.push({ path, data: bytes.buffer });
+      }
+    }
+    self.postMessage(
+      { id, stdout, stderr, generatedFiles, ...message },
+      generatedFiles.map((file) => file.data),
+    );
   };
 
   try {
@@ -62,10 +110,14 @@ self.onmessage = async ({ data }) => {
       arguments: [subcommand, ...args],
       locateFile: (path) => new URL(path, import.meta.url).href,
       preRun: [
-        (module) => {
+        (instance) => {
+          module = instance;
           module.FS.mkdirTree("/workspace");
-          for (const file of files)
-            module.FS.writeFile(file.path, new Uint8Array(file.data));
+          for (const file of files) {
+            const bytes = new Uint8Array(file.data);
+            module.FS.writeFile(file.path, bytes);
+            originalFiles.set(file.path, fingerprint(bytes));
+          }
           module.FS.chdir("/workspace");
         },
       ],
