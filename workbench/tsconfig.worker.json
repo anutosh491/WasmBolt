@@ -1,0 +1,24 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["WebWorker", "ES2022"],
+    "outDir": ".cache/worker-types",
+    "tsBuildInfoFile": ".cache/worker.tsbuildinfo",
+    "types": []
+  },
+  "include": [
+    "src/compiler/worker.ts",
+    "src/compiler/runtime.ts",
+    "src/compiler/assets.ts",
+    "src/compiler/protocol.ts",
+    "src/compiler/types.ts",
+    "src/compiler/request.ts",
+    "src/compiler/diagnostics.ts",
+    "src/compiler/execution.ts",
+    "src/compiler/module.ts",
+    "src/compiler/files.ts",
+    "src/compiler/terminal.ts",
+    "src/compiler/wasm.ts"
+  ],
+  "exclude": []
+}

@@ -1,0 +1,10 @@
+# Browser kernel dependencies resolved from environment.yml.
+# platform: emscripten-wasm32
+@EXPLICIT
+https://prefix.dev/emscripten-forge-4x/noarch/emscripten-abi-4.0.9-h267e887_9.tar.bz2#0dd4620a5b4f2ec7d492b4162afd609eda221ef066bac3e7fe9210ae27a37318
+https://prefix.dev/emscripten-forge-4x/noarch/clang-resource-headers-21.1.8-h267e887_1.tar.bz2#a54a7d46e58b6efc8d64f6bc8c059f3ff4635614582610ed2d117308dea10e1d
+https://conda.anaconda.org/conda-forge/noarch/nlohmann_json-abi-3.12.0-h0f90c79_2.conda#30d271dd63391e053aa3c393c5d93fb622dec5d50a64107171ee28242660608e
+https://prefix.dev/emscripten-forge-4x/emscripten-wasm32/nlohmann_json-3.12.0-h0b0027f_0.tar.bz2#a616da847fc88fdcf6abbe208583f9f28d72d4628c33d47ea4a07c84a22de524
+https://prefix.dev/emscripten-forge-4x/emscripten-wasm32/cppinterop-1.9.0-h0b0027f_0.tar.bz2#ee1433b4e7e218391a59b79a4b0a9355fb38b42daef7f3df78974cf5b56d7823
+https://prefix.dev/emscripten-forge-4x/emscripten-wasm32/xeus-6.0.5-h0b0027f_0.tar.bz2#cb01edb59b5627f892902a05a5abe6b2ef56e6ab0e2032e8b5180bd453f07998
+https://prefix.dev/emscripten-forge-4x/emscripten-wasm32/xeus-cpp-0.10.0-h0b0027f_0.tar.bz2#de269a95d4e5cca9840615db5c231823017f237435d32f523b943118c205c046

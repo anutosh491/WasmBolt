@@ -1,0 +1,168 @@
+name: Build
+
+on:
+  push:
+    branches: main
+  pull_request:
+    branches: '*'
+  workflow_call:
+    inputs:
+      release:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/browsers
+    steps:
+      # actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: prefix-dev/setup-pixi@v0.10.2
+        with:
+          pixi-version: v0.59.0
+          cache: true
+      - name: Install the Lite build environment
+        run: pixi install --all --locked
+      - name: Install JavaScript dependencies
+        run: pixi run --as-is jlpm install --immutable
+      - name: Restore compiler assets
+        id: compiler
+        if: ${{ !inputs.release }}
+        # actions/cache@v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: compiler
+          key: >-
+            compiler-linux-${{ hashFiles( 'runtime/src/**',
+            'runtime/CMakeLists.txt', 'runtime/locks/**',
+            'runtime/sources.json', 'runtime/licenses/**',
+            'scripts/compiler.mjs') }}
+      - name: Reproduce compiler
+        if: steps.compiler.outputs.cache-hit != 'true'
+        run: pixi run --as-is jlpm build:compiler
+      - name: Check source and unit tests
+        run: |
+          pixi run --as-is jlpm lint:check
+          pixi run --as-is jlpm typecheck
+          pixi run --as-is jlpm test
+          pixi run --as-is actionlint
+      - name: Build all hosts
+        run: |
+          pixi run --as-is jlpm build:prod
+          pixi run --as-is python -m pip install \
+            --no-build-isolation --no-deps -e .
+          pixi run --as-is jupyter-builder develop . --overwrite
+          pixi run --as-is jlpm build:standalone
+          pixi run --as-is node scripts/lite.mjs
+          pixi run --as-is node scripts/site.mjs
+      - name: Build and verify distributions
+        run: |
+          pixi run --as-is jlpm pack --out dist/fortitudo.tgz
+          pixi run --as-is python -m build --no-isolation
+          pixi run --as-is jlpm test:packages
+          pixi run --as-is python scripts/release.py
+      - name: Install browsers
+        run: pixi run --as-is jlpm playwright install --with-deps
+      - name: Test the installed launcher without JupyterLab
+        run: |
+          pixi run --as-is python -m venv work/wheel-env
+          work/wheel-env/bin/python -m pip install --no-index --no-deps \
+            dist/fortitudo-*.whl
+          work/wheel-env/bin/python -I -m unittest discover -s tests -v
+      - name: Test real browser workflows
+        env:
+          FORTITUDO_LOCAL_COMMAND: work/wheel-env/bin/fortitudo
+        run: pixi run --as-is jlpm test:browser
+      - name: Upload GitHub Pages site
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        # actions/upload-pages-artifact@v5.0.0
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9
+        with:
+          path: dist/site
+      # actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: browser-results
+          path: |
+            playwright-report
+            test-results
+      # actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: npm-distribution
+          path: dist/fortitudo.tgz
+          if-no-files-found: error
+          compression-level: 0
+      # actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: python-distributions
+          path: |
+            dist/fortitudo-*.whl
+            dist/fortitudo-*.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+      # actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: distributions
+          path: |
+            dist/fortitudo*
+            dist/standalone
+            lite/_output
+            compiler/manifest.json
+            dist/release.json
+          if-no-files-found: error
+
+  wheel:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      # actions/setup-python@v7.0.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      # actions/download-artifact@v8.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: distributions
+      - name: Verify installation without a frontend build
+        run: |
+          python -m pip install 'jupyterlab>=4.6,<5' dist/fortitudo*.whl
+          jupyter labextension list
+          python -m jupyterlab.browser_check --no-browser-test
+
+  pages:
+    needs: [build, wheel]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    steps:
+      - name: Configure GitHub Pages
+        # actions/configure-pages@v6.0.0
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d
+      - name: Deploy GitHub Pages
+        id: deploy
+        # actions/deploy-pages@v5.0.1
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346

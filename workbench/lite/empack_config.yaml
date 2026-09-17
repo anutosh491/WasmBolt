@@ -1,0 +1,13 @@
+# These libraries are loaded through kernelspec metadata.shared before the
+# interpreter starts. Do not also unpack them into each kernel's filesystem.
+packages:
+  cppinterop:
+    exclude_patterns:
+      - pattern: 'lib/libclangCppInterOp.so*'
+  xeus:
+    exclude_patterns:
+      - pattern: 'lib/libxeus.so'
+default:
+  exclude_patterns:
+    - pattern: 'bin/**'
+    - pattern: 'share/jupyter/**'

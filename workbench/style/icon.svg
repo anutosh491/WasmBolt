@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#365bbb">
+  <title>Fortitudo</title>
+  <style>
+    @media (prefers-color-scheme: dark) {
+      :root { fill: #91adff; }
+    }
+  </style>
+  <path fill-rule="evenodd"
+    d="M4 2h16v9c0 5-8 11-8 11S4 16 4 11V2Zm5 4v11h2v-4h4v-2h-4V8h5V6Z" />
+</svg>

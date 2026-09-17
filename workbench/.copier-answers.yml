@@ -1,0 +1,19 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: v4.6.5
+_src_path: https://github.com/jupyterlab/extension-template
+advanced: true
+author_email: fortitudo@darian.at
+author_name: A. T. Darian
+create_claude_symlink: false
+create_gemini_symlink: false
+has_ai_rules: true
+has_binder: false
+has_settings: true
+kind: frontend
+labextension_name: fortitudo
+project_short_description: A JupyterLab extension.
+python_name: fortitudo
+repository: https://github.com/afshin/fortitudo
+test: true
+yarn_linker: node-modules
+

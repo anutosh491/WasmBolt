@@ -1,0 +1,84 @@
+.fortitudo-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 24px;
+  padding: 8px 16px;
+  border-bottom: 1px solid #d3d7dc;
+  background: #f5f6f8;
+  color: #20252c;
+  font:
+    14px system-ui,
+    sans-serif;
+}
+
+.fortitudo-navigation-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+
+.fortitudo-navigation .fortitudo-brand {
+  width: auto;
+  margin-right: 0;
+}
+
+.fortitudo-workbench .fortitudo-brand {
+  display: none;
+}
+
+.fortitudo-navigation a {
+  display: inline-flex;
+  box-sizing: border-box;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 2px 0;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.fortitudo-navigation img {
+  flex: none;
+}
+
+.fortitudo-badge-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.5;
+}
+
+.fortitudo-badge-text small {
+  font-size: 11px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+.fortitudo-navigation a:hover {
+  color: #365bbb;
+}
+
+.fortitudo-navigation a:focus-visible {
+  outline: 2px solid currentcolor;
+  outline-offset: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .fortitudo-navigation {
+    border-color: #48505b;
+    background: #242a33;
+    color: #eef1f5;
+  }
+
+  .fortitudo-github-icon {
+    filter: invert(1);
+  }
+
+  .fortitudo-navigation a:hover {
+    color: #91adff;
+  }
+}

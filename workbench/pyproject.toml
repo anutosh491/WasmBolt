@@ -1,0 +1,108 @@
+[build-system]
+requires = [
+    "hatchling>=1.27.0",
+    "hatch-nodejs-version>=0.3.2",
+    "jupyter-builder>=1.2.0,<2",
+]
+build-backend = "hatchling.build"
+
+[project]
+name = "fortitudo"
+readme = "README.md"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+classifiers = [
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "Framework :: Jupyter",
+    "Framework :: Jupyter :: JupyterLab",
+    "Framework :: Jupyter :: JupyterLab :: 4",
+    "Framework :: Jupyter :: JupyterLab :: Extensions",
+    "Framework :: Jupyter :: JupyterLab :: Extensions :: Prebuilt",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Compilers",
+]
+dependencies = [
+]
+dynamic = ["version", "description", "authors", "urls", "keywords"]
+
+[project.scripts]
+fortitudo = "fortitudo.server:main"
+
+[project.optional-dependencies]
+dev = [
+    "jupyterlab>=4.6,<5",
+    "jupyter-builder>=1.2.0",
+]
+
+[tool.hatch.version]
+source = "nodejs"
+
+[tool.hatch.metadata.hooks.nodejs]
+fields = ["description", "authors", "urls", "keywords"]
+
+[tool.hatch.build.targets.sdist]
+# Twine 6.2 and the publishing action validate core metadata through 2.4.
+core-metadata-version = "2.4"
+artifacts = ["fortitudo/labextension", "fortitudo/site"]
+exclude = [".github", "binder", "*.tgz"]
+
+[tool.hatch.build.targets.wheel]
+core-metadata-version = "2.4"
+# Shared data must retain the Wasm driver despite the global *.so ignore.
+ignore-vcs = true
+exclude = ["fortitudo/labextension/**"]
+
+[tool.hatch.build.targets.wheel.shared-data]
+"fortitudo/labextension" = "share/jupyter/labextensions/fortitudo"
+"install.json" = "share/jupyter/labextensions/fortitudo/install.json"
+
+[tool.hatch.build.hooks.version]
+path = "fortitudo/_version.py"
+
+[tool.hatch.build.hooks.jupyter-builder]
+dependencies = ["hatch-jupyter-builder>=0.5"]
+build-function = "hatch_jupyter_builder.npm_builder"
+ensured-targets = [
+    "fortitudo/site/routes.json",
+    "fortitudo/labextension/static/style.js",
+    "fortitudo/labextension/package.json",
+    "fortitudo/labextension/static/compiler/manifest.json",
+    "fortitudo/labextension/static/compiler/worker.js",
+    "fortitudo/labextension/static/compiler/Compiler.js",
+    "fortitudo/labextension/static/compiler/Compiler.wasm",
+    "fortitudo/labextension/static/compiler/Compiler.data",
+    "fortitudo/labextension/static/compiler/WasmBoltMlirOpt.so",
+    "fortitudo/labextension/static/compiler/licenses/LLVM.txt",
+    "fortitudo/labextension/static/compiler/licenses/WasmBolt.txt",
+
+]
+skip-if-exists = [
+    "fortitudo/site/routes.json",
+    "fortitudo/labextension/static/compiler/manifest.json",
+    "fortitudo/labextension/static/compiler/worker.js",
+    "fortitudo/labextension/static/compiler/Compiler.js",
+    "fortitudo/labextension/static/compiler/Compiler.wasm",
+    "fortitudo/labextension/static/compiler/Compiler.data",
+    "fortitudo/labextension/static/compiler/WasmBoltMlirOpt.so",
+]
+
+[tool.hatch.build.hooks.jupyter-builder.build-kwargs]
+build_cmd = "build:package"
+npm = ["jlpm"]
+
+[tool.hatch.build.hooks.jupyter-builder.editable-build-kwargs]
+build_cmd = "install:extension"
+npm = ["jlpm"]
+source_dir = "src"
+build_dir = "fortitudo/labextension"
+
+[tool.check-wheel-contents]
+ignore = ["W002"]
