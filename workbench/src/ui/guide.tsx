@@ -14,13 +14,13 @@ export function Guide({ onClose }: { onClose(): void }): React.ReactElement {
   return (
     <dialog
       ref={node}
-      className="fortitudo-guide"
-      aria-labelledby="fortitudo-guide-title"
+      className="wasmbolt-guide"
+      aria-labelledby="wasmbolt-guide-title"
       onClose={onClose}
       onKeyDown={event => event.stopPropagation()}
     >
       <header>
-        <h2 id="fortitudo-guide-title">Fortitudo guide</h2>
+        <h2 id="wasmbolt-guide-title">WasmBolt guide</h2>
         <button onClick={() => node.current?.close()}>Close guide</button>
       </header>
       <nav aria-label="Guide sections">
@@ -29,7 +29,7 @@ export function Guide({ onClose }: { onClose(): void }): React.ReactElement {
             key={title}
             onClick={() => {
               const heading = node.current?.querySelector<HTMLElement>(
-                `#fortitudo-guide-${index}`
+                `#wasmbolt-guide-${index}`
               );
               heading?.scrollIntoView({ block: 'start' });
               heading?.focus({ preventScroll: true });
@@ -42,7 +42,7 @@ export function Guide({ onClose }: { onClose(): void }): React.ReactElement {
       <article>
         {sections.map(({ title, html }, index) => (
           <section key={title}>
-            <h3 id={`fortitudo-guide-${index}`} tabIndex={-1}>
+            <h3 id={`wasmbolt-guide-${index}`} tabIndex={-1}>
               {title}
             </h3>
             {/* This HTML is generated only from the repository's README. */}

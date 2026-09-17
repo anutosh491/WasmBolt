@@ -1,5 +1,6 @@
 import type { RunResult } from './compiler/execution';
 import type {
+  Artifact,
   CommandResult,
   File,
   Info,
@@ -13,15 +14,23 @@ import { availableOutputs, pipelines } from './compiler/types';
 import { inspectWasm } from './compiler/wasm';
 import type { WasmInfo } from './compiler/wasm';
 import { examples } from './examples';
+import {
+  exampleFiles,
+  languageForPath,
+  replaceFile,
+  sourcePath,
+  text
+} from './workspace';
 
 export type Pane =
+  | 'explorer'
   | 'source'
   | 'outputs'
   | 'comparison'
   | 'diagnostics'
-  | 'files'
   | 'terminal'
   | 'run'
+  | 'debugger'
   | 'pipelines';
 export type OutputGroup = 'primary' | 'comparison';
 
@@ -41,6 +50,8 @@ export type Area =
 export type Session = Readonly<{
   version: 2;
   source: string;
+  documents?: readonly Readonly<{ path: string; source: string }>[];
+  activeFile?: string;
   options: Options;
   layout: Area | null;
   outputs: Readonly<Record<OutputGroup, OutputKind>>;
@@ -59,8 +70,48 @@ export type Execution = Readonly<{
   notice: string | null;
 }>;
 
+export type DebugBreakpointState = Readonly<{
+  path: string;
+  line: number;
+  verified: boolean | null;
+  message?: string;
+}>;
+
+export type DebugFrameState = Readonly<{
+  id: number;
+  name: string;
+  path: string | null;
+  line: number | null;
+  column: number | null;
+}>;
+
+export type DebugVariableState = Readonly<{
+  name: string;
+  value: string;
+  type?: string;
+  variablesReference?: number;
+}>;
+
+export type DebugState = Readonly<{
+  status: 'idle' | 'starting' | 'running' | 'stopped' | 'exited' | 'error';
+  module: string | null;
+  breakpoints: readonly DebugBreakpointState[];
+  frames: readonly DebugFrameState[];
+  frameId: number | null;
+  variables: readonly DebugVariableState[];
+  console: readonly Readonly<{
+    channel: 'input' | 'stdout' | 'stderr' | 'console';
+    text: string;
+  }>[];
+  message: string | null;
+  exitCode: number | null;
+}>;
+
 export type State = Readonly<{
   source: string;
+  activeFile: string;
+  selectedFile: string;
+  editableFiles: readonly string[];
   options: Options;
   layout: Area | null;
   outputs: Session['outputs'];
@@ -76,12 +127,16 @@ export type State = Readonly<{
   moduleRevisions: Readonly<Record<string, number>>;
   terminal: readonly Stage[];
   execution: Execution;
+  debugger: DebugState;
   notice: string | null;
   position: Readonly<{ line: number; column: number; serial: number }> | null;
 }>;
 
 export type Action =
   | Readonly<{ type: 'source'; source: string }>
+  | Readonly<{ type: 'file-create'; path: string }>
+  | Readonly<{ type: 'file-import'; path: string; data: Uint8Array }>
+  | Readonly<{ type: 'file-select'; path: string }>
   | Readonly<{ type: 'options'; options: Options }>
   | Readonly<{ type: 'layout'; layout: Area | null }>
   | Readonly<{ type: 'output'; group: OutputGroup; output: OutputKind }>
@@ -103,6 +158,39 @@ export type Action =
   | Readonly<{ type: 'run-finished'; id: number; result: RunResult }>
   | Readonly<{ type: 'run-failed'; id: number; message: string }>
   | Readonly<{ type: 'run-reset' }>
+  | Readonly<{ type: 'debug-toggle-breakpoint'; path: string; line: number }>
+  | Readonly<{
+      type: 'debug-status';
+      status: DebugState['status'];
+      message?: string;
+      module?: string;
+    }>
+  | Readonly<{
+      type: 'debug-breakpoints';
+      path: string;
+      breakpoints: readonly DebugBreakpointState[];
+    }>
+  | Readonly<{
+      type: 'debug-stopped';
+      frames: readonly DebugFrameState[];
+      frameId: number | null;
+      variables: readonly DebugVariableState[];
+      reason: string;
+    }>
+  | Readonly<{ type: 'debug-running' }>
+  | Readonly<{
+      type: 'debug-frame';
+      frameId: number;
+      variables: readonly DebugVariableState[];
+    }>
+  | Readonly<{ type: 'debug-exited'; exitCode: number }>
+  | Readonly<{
+      type: 'debug-console';
+      channel: 'input' | 'stdout' | 'stderr' | 'console';
+      text: string;
+    }>
+  | Readonly<{ type: 'debug-error'; message: string }>
+  | Readonly<{ type: 'debug-reset' }>
   | Readonly<{ type: 'navigate'; line: number; column: number }>;
 
 export const options: Options = {
@@ -114,9 +202,42 @@ export const options: Options = {
 
 /** Create an independent application state from a validated session. */
 export function initial(session: Session | null = null): State {
+  const saved = session?.documents?.map(document => ({
+    path: document.path,
+    data: new TextEncoder().encode(document.source)
+  }));
+  const language = session?.options.language ?? 'cpp';
+  let files = saved?.length
+    ? saved
+    : session
+      ? replaceFile(exampleFiles, {
+          path: sourcePath(language),
+          data: new TextEncoder().encode(session.source)
+        })
+      : exampleFiles;
+  const preferred = session?.activeFile ?? sourcePath(language);
+  if (session) {
+    files = replaceFile(files, {
+      path: preferred,
+      data: new TextEncoder().encode(session.source)
+    });
+  }
+  const active =
+    files.find(file => file.path === preferred && languageForPath(file.path)) ??
+    files.find(file => languageForPath(file.path)) ??
+    exampleFiles[0];
   return {
-    source: session?.source ?? examples.cpp,
-    options: session?.options ?? options,
+    source: text(active) ?? session?.source ?? examples.cpp,
+    activeFile: active.path,
+    selectedFile: active.path,
+    editableFiles: files
+      .filter(file => languageForPath(file.path) && text(file) !== null)
+      .map(file => file.path),
+    options: {
+      ...(session?.options ?? options),
+      language:
+        languageForPath(active.path) ?? session?.options.language ?? 'cpp'
+    },
     layout: session?.layout ?? null,
     outputs: outputSelection(session?.options ?? options, session?.outputs),
     timeout: session?.timeout ?? 10000,
@@ -126,7 +247,7 @@ export function initial(session: Session | null = null): State {
     progress: null,
     active: null,
     result: null,
-    files: [],
+    files,
     filesRevision: null,
     moduleRevisions: {},
     terminal: [],
@@ -140,6 +261,17 @@ export function initial(session: Session | null = null): State {
       result: null,
       notice: null,
       progress: null
+    },
+    debugger: {
+      status: 'idle',
+      module: null,
+      breakpoints: [],
+      frames: [],
+      frameId: null,
+      variables: [],
+      console: [],
+      message: null,
+      exitCode: null
     },
     notice: null,
     position: null
@@ -155,21 +287,103 @@ export function reduce(state: State, action: Action): State {
         : {
             ...state,
             source: action.source,
+            files: replaceFile(state.files, {
+              path: state.activeFile,
+              data: new TextEncoder().encode(action.source)
+            }),
             revision: state.revision + 1
           };
+    case 'file-create': {
+      const language = languageForPath(action.path);
+      const file = { path: action.path, data: new Uint8Array() };
+      const next = {
+        ...state,
+        files: replaceFile(state.files, file),
+        editableFiles: language
+          ? [...new Set([...state.editableFiles, action.path])]
+          : state.editableFiles,
+        selectedFile: action.path,
+        revision: state.revision + 1
+      };
+      return language ? activateSource(next, file, language) : next;
+    }
+    case 'file-import': {
+      const file = { path: action.path, data: action.data };
+      const language = languageForPath(action.path);
+      const editable = language !== null && text(file) !== null;
+      let next: State = {
+        ...state,
+        files: replaceFile(state.files, file),
+        editableFiles: editable
+          ? [...new Set([...state.editableFiles, action.path])]
+          : state.editableFiles.filter(path => path !== action.path),
+        selectedFile: action.path,
+        revision: state.revision + 1
+      };
+      if (editable && language) {
+        return activateSource(next, file, language);
+      }
+      if (action.path.endsWith('.wasm')) {
+        next = {
+          ...next,
+          moduleRevisions: {
+            ...next.moduleRevisions,
+            [action.path]: next.revision
+          }
+        };
+        return selectModule(next, action.path);
+      }
+      return next;
+    }
+    case 'file-select': {
+      const file = state.files.find(file => file.path === action.path);
+      if (!file) {
+        return state;
+      }
+      const language = languageForPath(file.path);
+      if (!language || !state.editableFiles.includes(file.path)) {
+        return { ...state, selectedFile: file.path };
+      }
+      return activateSource(
+        {
+          ...state,
+          selectedFile: file.path,
+          revision:
+            file.path === state.activeFile ? state.revision : state.revision + 1
+        },
+        file,
+        language
+      );
+    }
     case 'options':
-      return equalOptions(action.options, state.options)
-        ? state
-        : {
+      if (equalOptions(action.options, state.options)) {
+        return state;
+      }
+      if (action.options.language !== state.options.language) {
+        const path = sourcePath(action.options.language);
+        const file = state.files.find(file => file.path === path) ?? {
+          path,
+          data: new TextEncoder().encode(examples[action.options.language])
+        };
+        return activateSource(
+          {
             ...state,
+            files: replaceFile(state.files, file),
+            editableFiles: [...new Set([...state.editableFiles, path])],
             options: action.options,
-            source:
-              state.source === examples[state.options.language]
-                ? examples[action.options.language]
-                : state.source,
             outputs: outputSelection(action.options, state.outputs),
             revision: state.revision + 1
-          };
+          },
+          file,
+          action.options.language
+        );
+      }
+      return {
+        ...state,
+        options: action.options,
+        outputs: outputSelection(action.options, state.outputs),
+        revision: state.revision + 1
+      };
     case 'layout':
       return { ...state, layout: action.layout };
     case 'output':
@@ -215,12 +429,12 @@ export function reduce(state: State, action: Action): State {
               status: 'ready',
               progress: null,
               active: null,
-              terminal: [],
+              terminal: action.result.stages,
               result: { revision: state.active.revision, value: action.result },
               filesRevision: state.active.revision
             },
             action.result.files,
-            true
+            action.result.artifacts
           )
         : state;
     case 'command':
@@ -337,6 +551,138 @@ export function reduce(state: State, action: Action): State {
           status: 'stopped'
         }
       };
+    case 'debug-toggle-breakpoint': {
+      const exists = state.debugger.breakpoints.some(
+        breakpoint =>
+          breakpoint.path === action.path && breakpoint.line === action.line
+      );
+      return {
+        ...state,
+        debugger: {
+          ...state.debugger,
+          breakpoints: exists
+            ? state.debugger.breakpoints.filter(
+                breakpoint =>
+                  breakpoint.path !== action.path ||
+                  breakpoint.line !== action.line
+              )
+            : [
+                ...state.debugger.breakpoints,
+                {
+                  path: action.path,
+                  line: action.line,
+                  verified: null
+                }
+              ]
+        }
+      };
+    }
+    case 'debug-status':
+      return {
+        ...state,
+        debugger: {
+          ...state.debugger,
+          status: action.status,
+          module: action.module ?? state.debugger.module,
+          message: action.message ?? null,
+          ...(action.status === 'starting'
+            ? {
+                frames: [],
+                frameId: null,
+                variables: [],
+                console: [],
+                exitCode: null
+              }
+            : {})
+        }
+      };
+    case 'debug-breakpoints':
+      return {
+        ...state,
+        debugger: {
+          ...state.debugger,
+          breakpoints: [
+            ...state.debugger.breakpoints.filter(
+              breakpoint => breakpoint.path !== action.path
+            ),
+            ...action.breakpoints
+          ]
+        }
+      };
+    case 'debug-stopped':
+      return {
+        ...state,
+        debugger: {
+          ...state.debugger,
+          status: 'stopped',
+          frames: action.frames,
+          frameId: action.frameId,
+          variables: action.variables,
+          message: action.reason
+        }
+      };
+    case 'debug-running':
+      return {
+        ...state,
+        debugger: {
+          ...state.debugger,
+          status: 'running',
+          frames: [],
+          frameId: null,
+          variables: [],
+          message: null
+        }
+      };
+    case 'debug-frame':
+      return {
+        ...state,
+        debugger: {
+          ...state.debugger,
+          frameId: action.frameId,
+          variables: action.variables
+        }
+      };
+    case 'debug-exited':
+      return {
+        ...state,
+        debugger: {
+          ...state.debugger,
+          status: 'exited',
+          frames: [],
+          frameId: null,
+          variables: [],
+          exitCode: action.exitCode,
+          message: `Process exited with code ${action.exitCode}.`
+        }
+      };
+    case 'debug-console':
+      return {
+        ...state,
+        debugger: {
+          ...state.debugger,
+          console: [
+            ...state.debugger.console,
+            { channel: action.channel, text: action.text }
+          ]
+        }
+      };
+    case 'debug-error':
+      return {
+        ...state,
+        debugger: {
+          ...state.debugger,
+          status: 'error',
+          message: action.message
+        }
+      };
+    case 'debug-reset':
+      return {
+        ...state,
+        debugger: {
+          ...initial().debugger,
+          breakpoints: state.debugger.breakpoints
+        }
+      };
     case 'navigate':
       return {
         ...state,
@@ -352,7 +698,7 @@ export function reduce(state: State, action: Action): State {
 function withFiles(
   state: State,
   files: readonly File[],
-  compiled = false
+  artifacts: readonly Artifact[] = []
 ): State {
   const path =
     files.find(file => file.path === state.execution.module)?.path ??
@@ -363,19 +709,23 @@ function withFiles(
       .filter(file => file.path.endsWith('.wasm'))
       .map(file => {
         const previous = state.files.find(entry => entry.path === file.path);
+        const generated = artifacts.some(
+          artifact => artifact.kind === 'wasm' && artifact.path === file.path
+        );
         const unchanged =
-          !compiled &&
           previous?.data.length === file.data.length &&
           previous.data.every((byte, index) => byte === file.data[index]);
-        return [
-          file.path,
-          unchanged
-            ? state.moduleRevisions[file.path]
-            : (state.filesRevision ?? state.revision)
-        ];
+        const revision =
+          generated || !unchanged
+            ? (state.filesRevision ?? state.revision)
+            : state.moduleRevisions[file.path];
+        return [file.path, revision];
       })
   );
-  return selectModule({ ...state, files, moduleRevisions }, path);
+  const selectedFile = files.some(file => file.path === state.selectedFile)
+    ? state.selectedFile
+    : state.activeFile;
+  return selectModule({ ...state, files, moduleRevisions, selectedFile }, path);
 }
 
 /** Editing or inspecting other files cannot make an old module current. */
@@ -461,6 +811,14 @@ export function snapshot(state: State): Session {
   return {
     version: 2,
     source: state.source,
+    documents: state.files.flatMap(file => {
+      if (!state.editableFiles.includes(file.path)) {
+        return [];
+      }
+      const source = text(file);
+      return source === null ? [] : [{ path: file.path, source }];
+    }),
+    activeFile: state.activeFile,
     options: state.options,
     layout: state.layout,
     outputs: state.outputs,
@@ -484,8 +842,28 @@ function outputSelection(
 /** Only auxiliary tab groups can fold away while leaving their tabs visible. */
 export function isToolArea(panes: readonly Pane[]): boolean {
   return panes.every(
-    pane => !['source', 'outputs', 'comparison'].includes(pane)
+    pane => !['explorer', 'source', 'outputs', 'comparison'].includes(pane)
   );
+}
+
+function activateSource(
+  state: State,
+  file: File,
+  language: Options['language']
+): State {
+  const source = text(file);
+  if (source === null) {
+    return state;
+  }
+  const options = { ...state.options, language };
+  return {
+    ...state,
+    source,
+    activeFile: file.path,
+    selectedFile: file.path,
+    options,
+    outputs: outputSelection(options, state.outputs)
+  };
 }
 
 function equalOptions(left: Options, right: Options): boolean {

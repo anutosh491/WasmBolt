@@ -7,9 +7,15 @@ export default defineConfig({
     outDir: 'compiler',
     emptyOutDir: false,
     lib: {
-      entry: resolve('src/compiler/worker.ts'),
+      entry: {
+        worker: resolve('src/compiler/worker.ts'),
+        'tool-worker': resolve('src/compiler/tool-worker.ts'),
+        'clangd-worker': resolve('src/clangd/worker.ts'),
+        'lldb-worker': resolve('src/lldb/worker.ts'),
+        'debug-worker': resolve('src/lldb/debug-worker.ts')
+      },
       formats: ['es'],
-      fileName: () => 'worker.js'
+      fileName: (_, name) => `${name}.js`
     },
     minify: 'esbuild'
   }

@@ -18,13 +18,16 @@ it('routes edits and releases command registrations', async () => {
   let finish: (result: Result) => void = () => {
     throw new Error('not started');
   };
+  const compile = jest.fn(
+    () =>
+      new Promise<Result>(resolve => {
+        finish = resolve;
+      })
+  );
   const compiler: ICompiler = {
     initialize: async () => info,
     command: jest.fn(),
-    compile: () =>
-      new Promise(resolve => {
-        finish = resolve;
-      }),
+    compile,
     cancel: jest.fn(),
     dispose: jest.fn()
   };
@@ -59,6 +62,10 @@ it('routes edits and releases command registrations', async () => {
     duration: 1
   });
   await running;
+  expect(compile).toHaveBeenCalledWith(
+    expect.objectContaining({ output: 'assembly' }),
+    expect.any(Function)
+  );
   expect(stale(store.state)).toBe(true);
   expect(activatePane).not.toHaveBeenCalled();
   expect(commands.isEnabled(CommandIDs.compile)).toBe(true);

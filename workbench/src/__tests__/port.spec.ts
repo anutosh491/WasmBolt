@@ -60,7 +60,21 @@ it('plans applicable outputs with a single optimization stage', () => {
   };
   const plan = (language: typeof options.language, target = options.target) =>
     invocation(
-      { id: 1, source: '', options: { ...options, language, target } },
+      {
+        id: 1,
+        source: '',
+        sourcePath: `/workspace/${
+          language === 'llvm'
+            ? 'input.ll'
+            : language === 'mlir'
+              ? 'input.mlir'
+              : language === 'c'
+                ? 'snippet.c'
+                : 'snippet.cpp'
+        }`,
+        files: [],
+        options: { ...options, language, target }
+      },
       info,
       '/workspace'
     );
@@ -110,8 +124,9 @@ it('migrates v1 layouts without losing edits or split proportions', () => {
         widgets: [
           'outputs',
           'diagnostics',
-          'files',
+          'explorer',
           'terminal',
+          'debugger',
           'run',
           'pipelines'
         ]

@@ -18,7 +18,19 @@
     "src/compiler/module.ts",
     "src/compiler/files.ts",
     "src/compiler/terminal.ts",
-    "src/compiler/wasm.ts"
+    "src/compiler/wasm.ts",
+    "src/compiler/tool-worker.ts",
+    "src/compiler/tool.ts",
+    "src/compiler/tool-protocol.ts",
+    "src/clangd/worker.ts",
+    "src/clangd/runtime.ts",
+    "src/clangd/protocol.ts",
+    "src/lldb/worker.ts",
+    "src/lldb/protocol.ts",
+    "src/lldb/debug-worker.ts",
+    "src/lldb/debug-protocol.ts",
+    "src/lldb/debugger.ts",
+    "src/lldb/phase.ts"
   ],
   "exclude": []
 }

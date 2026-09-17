@@ -1,4 +1,4 @@
-.fortitudo-navigation {
+.wasmbolt-navigation {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -13,22 +13,22 @@
     sans-serif;
 }
 
-.fortitudo-navigation-links {
+.wasmbolt-navigation-links {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 24px;
 }
 
-.fortitudo-navigation .fortitudo-brand {
+.wasmbolt-navigation .wasmbolt-brand {
   width: auto;
   margin-right: 0;
 }
 
-.fortitudo-workbench .fortitudo-brand {
+.wasmbolt-workbench .wasmbolt-brand {
   display: none;
 }
 
-.fortitudo-navigation a {
+.wasmbolt-navigation a {
   display: inline-flex;
   box-sizing: border-box;
   align-items: center;
@@ -41,44 +41,44 @@
   text-decoration: none;
 }
 
-.fortitudo-navigation img {
+.wasmbolt-navigation img {
   flex: none;
 }
 
-.fortitudo-badge-text {
+.wasmbolt-badge-text {
   display: flex;
   flex-direction: column;
   line-height: 1.5;
 }
 
-.fortitudo-badge-text small {
+.wasmbolt-badge-text small {
   font-size: 11px;
   font-weight: 400;
   font-variant-numeric: tabular-nums;
   opacity: 0.75;
 }
 
-.fortitudo-navigation a:hover {
+.wasmbolt-navigation a:hover {
   color: #365bbb;
 }
 
-.fortitudo-navigation a:focus-visible {
+.wasmbolt-navigation a:focus-visible {
   outline: 2px solid currentcolor;
   outline-offset: 2px;
 }
 
 @media (prefers-color-scheme: dark) {
-  .fortitudo-navigation {
+  .wasmbolt-navigation {
     border-color: #48505b;
     background: #242a33;
     color: #eef1f5;
   }
 
-  .fortitudo-github-icon {
+  .wasmbolt-github-icon {
     filter: invert(1);
   }
 
-  .fortitudo-navigation a:hover {
+  .wasmbolt-navigation a:hover {
     color: #91adff;
   }
 }

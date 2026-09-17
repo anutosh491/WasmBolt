@@ -1,5 +1,4 @@
 import type { Info, OutputKind, Request } from './types';
-import { sourceName } from './types';
 
 export type Step = Readonly<{
   name: OutputKind;
@@ -22,7 +21,10 @@ export function invocation(
   directory: string
 ): Invocation {
   const { language, target, optimization } = request.options;
-  const source = `${directory}/${sourceName(language)}`;
+  const source = request.sourcePath;
+  if (!source.startsWith(`${directory}/`)) {
+    throw new Error('The source file must be in the workspace.');
+  }
   const ir = `${directory}/source.ll`;
   const optimized = `${directory}/optimized.ll`;
   const object = `${directory}/output.o`;
@@ -61,32 +63,33 @@ export function invocation(
   ];
   if (language === 'mlir') {
     const path = `${directory}/optimized.mlir`;
+    const steps: readonly Step[] = [
+      {
+        name: 'mlir',
+        requires: [],
+        path,
+        commands: [
+          [
+            'mlir-opt',
+            `--pass-pipeline=${request.options.mlirPipeline}`,
+            source,
+            '-o',
+            path
+          ]
+        ]
+      },
+      {
+        name: 'graphs',
+        requires: ['mlir'],
+        path: `${directory}/operations.dot`,
+        capture: 'stderr',
+        graphs: 'mlir',
+        commands: [['mlir-opt', '--view-op-graph', path, '-o', '/dev/null']]
+      }
+    ];
     return {
       source,
-      steps: [
-        {
-          name: 'mlir',
-          requires: [],
-          path,
-          commands: [
-            [
-              'mlir-opt',
-              `--pass-pipeline=${request.options.mlirPipeline}`,
-              source,
-              '-o',
-              path
-            ]
-          ]
-        },
-        {
-          name: 'graphs',
-          requires: ['mlir'],
-          path: `${directory}/operations.dot`,
-          capture: 'stderr',
-          graphs: 'mlir',
-          commands: [['mlir-opt', '--view-op-graph', path, '-o', '/dev/null']]
-        }
-      ]
+      steps: selectSteps(steps, request.output)
     };
   }
   if (language !== 'llvm') {
@@ -205,7 +208,37 @@ export function invocation(
       ]
     });
   }
-  return { source, steps };
+  return { source, steps: selectSteps(steps, request.output) };
+}
+
+/** Keep the selected output and its transitive prerequisites in plan order. */
+function selectSteps(
+  steps: readonly Step[],
+  output: OutputKind | undefined
+): readonly Step[] {
+  if (output === undefined) {
+    return steps;
+  }
+  const byName = new Map(steps.map(step => [step.name, step]));
+  if (!byName.has(output)) {
+    throw new Error('The selected output is unavailable for this build.');
+  }
+  const selected = new Set<OutputKind>();
+  const include = (name: OutputKind): void => {
+    if (selected.has(name)) {
+      return;
+    }
+    const step = byName.get(name);
+    if (!step) {
+      throw new Error(`The build plan is missing its ${name} prerequisite.`);
+    }
+    for (const dependency of step.requires) {
+      include(dependency);
+    }
+    selected.add(name);
+  };
+  include(output);
+  return steps.filter(step => selected.has(step.name));
 }
 
 /** Quote arguments for LLVM's GNU command-line tokenizer, not a shell. */

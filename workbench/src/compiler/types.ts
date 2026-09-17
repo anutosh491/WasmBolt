@@ -41,7 +41,11 @@ export type Progress =
 export type Request = Readonly<{
   id: number;
   source: string;
+  sourcePath: string;
+  files: readonly File[];
   options: Options;
+  /** Stop after producing this representation and its prerequisites. */
+  output?: OutputKind;
 }>;
 
 export type Diagnostic = Readonly<{
@@ -233,7 +237,28 @@ export function isRequest(value: unknown): value is Request {
     Number.isSafeInteger(value.id) &&
     'source' in value &&
     typeof value.source === 'string' &&
+    'sourcePath' in value &&
+    typeof value.sourcePath === 'string' &&
+    value.sourcePath.startsWith('/workspace/') &&
+    'files' in value &&
+    Array.isArray(value.files) &&
+    value.files.every(isFile) &&
     'options' in value &&
-    isOptions(value.options)
+    isOptions(value.options) &&
+    (!('output' in value) ||
+      value.output === undefined ||
+      isOutputKind(value.output))
+  );
+}
+
+function isFile(value: unknown): value is File {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'path' in value &&
+    typeof value.path === 'string' &&
+    value.path.startsWith('/workspace/') &&
+    'data' in value &&
+    value.data instanceof Uint8Array
   );
 }

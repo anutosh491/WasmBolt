@@ -10,14 +10,14 @@ body {
   flex-direction: column;
 }
 
-#fortitudo {
+#wasmbolt {
   position: relative;
   flex: 1;
   min-height: 0;
   overflow: hidden;
 }
 
-#fortitudo > .fortitudo-workbench {
+#wasmbolt > .wasmbolt-workbench {
   position: absolute;
   inset: 0;
 }

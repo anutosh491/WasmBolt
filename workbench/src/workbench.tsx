@@ -4,11 +4,15 @@ import type { Message } from '@lumino/messaging';
 import { BoxPanel } from '@lumino/widgets';
 import * as React from 'react';
 
+import { createClangd } from './clangd/client';
+import type { IClangdClient } from './clangd/types';
 import { CommandIDs, registerCommands } from './commands';
 import { createRunner } from './compiler/runner';
 import type { IRunner } from './compiler/execution';
 import { createCompiler } from './compiler/client';
 import type { ICompiler, OutputKind } from './compiler/types';
+import { createDebugger } from './lldb/client';
+import type { IDebuggerClient } from './lldb/debugger';
 import { initial, snapshot } from './model';
 import type { Pane, Session } from './model';
 import { session } from './persistence';
@@ -27,6 +31,9 @@ export interface IWorkbenchOptions {
   persistence: IPersistence;
   defaults?: Session;
   sharing?: ISharing;
+  clangd?: IClangdClient;
+  debugger?: IDebuggerClient;
+  preloadCompiler?: boolean;
 }
 
 /** Load editing state without initializing or invoking the compiler. */
@@ -67,17 +74,31 @@ export class Workbench extends BoxPanel {
     private readonly store: IStore
   ) {
     super({ direction: 'top-to-bottom', spacing: 0 });
-    this.id = 'fortitudo-workbench';
-    this.title.label = 'Fortitudo';
-    this.title.iconClass = 'fortitudo-icon';
+    this.id = 'wasmbolt-workbench';
+    this.title.label = 'WasmBolt';
+    this.title.iconClass = 'wasmbolt-icon';
     this.title.closable = true;
-    this.addClass('fortitudo-workbench');
+    this.addClass('wasmbolt-workbench');
     this.compiler = createCompiler(options.workerUrl);
     this.runner = createRunner(options.workerUrl);
+    const assetBase = new URL('.', options.workerUrl);
+    this.clangd =
+      options.clangd ??
+      createClangd({
+        workerUrl: new URL('clangd-worker.js', assetBase),
+        assetBase: new URL('clangd/', assetBase)
+      });
+    this.debugger =
+      options.debugger ??
+      createDebugger({
+        workerUrl: new URL('debug-worker.js', assetBase),
+        assetBase: new URL('lldb-dap/', assetBase)
+      });
     const header = this.view('controls');
-    header.addClass('fortitudo-header');
+    header.addClass('wasmbolt-header');
     this.addWidget(header);
     const panes = {
+      explorer: this.view('explorer'),
       source: this.view('source'),
       outputs: new OutputPanel(store, options.commands, 'primary', kind =>
         this.view('outputs', kind)
@@ -86,17 +107,18 @@ export class Workbench extends BoxPanel {
         this.view('comparison', kind)
       ),
       diagnostics: this.view('diagnostics'),
-      files: this.view('files'),
       terminal: this.view('terminal'),
       run: this.view('run'),
+      debugger: this.view('debugger'),
       pipelines: this.view('pipelines')
     };
+    panes.explorer.title.label = 'Explorer';
     panes.source.title.label = 'Source';
     panes.outputs.title.label = 'Outputs';
     panes.comparison.title.label = 'Comparison';
-    panes.files.title.label = 'Files';
     panes.terminal.title.label = 'Terminal';
     panes.run.title.label = 'Run';
+    panes.debugger.title.label = 'Debugger';
     panes.pipelines.title.label = 'Pipelines';
     panes.diagnostics.title.label = 'Diagnostics';
     this.panels = new PanePanel(panes, store.state.layout, () =>
@@ -108,6 +130,7 @@ export class Workbench extends BoxPanel {
       store,
       compiler: this.compiler,
       runner: this.runner,
+      debugger: this.debugger,
       sharing: options.sharing,
       resetLayout: () => this.panels.reset(),
       compare: () => this.panels.compare(),
@@ -125,10 +148,15 @@ export class Workbench extends BoxPanel {
         }
       }
     });
+    if (options.preloadCompiler) {
+      void options.commands.execute(CommandIDs.initialize).catch(error => {
+        store.dispatch({ type: 'notice', message: String(error) });
+      });
+    }
     this.binding = options.commands.addKeyBinding({
       command: CommandIDs.compile,
       keys: ['Accel Enter'],
-      selector: '.fortitudo-workbench'
+      selector: '.wasmbolt-workbench'
     });
     let previous = snapshot(store.state);
     let position = store.state.position;
@@ -136,6 +164,7 @@ export class Workbench extends BoxPanel {
       const next = snapshot(store.state);
       if (
         next.source !== previous.source ||
+        next.activeFile !== previous.activeFile ||
         next.options !== previous.options ||
         next.layout !== previous.layout ||
         next.outputs !== previous.outputs ||
@@ -164,6 +193,8 @@ export class Workbench extends BoxPanel {
       this.registered.dispose();
       this.compiler.dispose();
       this.runner.dispose();
+      this.clangd.dispose();
+      this.debugger.dispose();
       this.store.dispose();
       super.dispose();
     }
@@ -188,13 +219,14 @@ export class Workbench extends BoxPanel {
       <Bridge
         store={this.store}
         commands={this.options.commands}
+        clangd={this.clangd}
         pane={pane}
         output={output}
         canShare={!!this.options.sharing}
         onSize={resize}
       />
     ));
-    widget.addClass('fortitudo-view');
+    widget.addClass('wasmbolt-view');
     widget.node.dataset.pane = pane;
     if (output) {
       widget.node.dataset.output = output;
@@ -249,6 +281,8 @@ export class Workbench extends BoxPanel {
   private readonly panels: PanePanel;
   private readonly compiler: ICompiler;
   private readonly runner: IRunner;
+  private readonly clangd: IClangdClient;
+  private readonly debugger: IDebuggerClient;
   private readonly registered: IDisposable;
   private readonly binding: IDisposable;
   private readonly unsubscribe: () => void;

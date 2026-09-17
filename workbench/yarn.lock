@@ -6725,6 +6725,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "fortitudo@workspace:."
   dependencies:
+    "@codemirror/autocomplete": ^6.20.0
     "@codemirror/commands": ^6.8.0
     "@codemirror/lang-cpp": ^6.0.3
     "@codemirror/language": ^6.11.0

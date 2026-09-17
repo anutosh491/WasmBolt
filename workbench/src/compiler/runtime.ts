@@ -40,7 +40,7 @@ export function runtime(module: IModuleRuntime): IRuntime {
       }
       const start = performance.now();
       const plan = invocation(request, info, '/workspace');
-      restore(fs, []);
+      restore(fs, request.files);
       fs.writeFile(plan.source, request.source);
       const stages: Stage[] = [];
       const paths = new Map<string, OutputKind>();

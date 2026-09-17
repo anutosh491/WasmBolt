@@ -25,9 +25,9 @@ const x86Highlighting = [
           tags.number,
           tags.string
         ],
-        color: 'var(--fortitudo-accent)'
+        color: 'var(--wasmbolt-accent)'
       },
-      { tag: tags.comment, color: 'var(--fortitudo-muted)' }
+      { tag: tags.comment, color: 'var(--wasmbolt-muted)' }
     ])
   )
 ];
@@ -86,7 +86,7 @@ export function TextOutput({
   }, [text, label, x86]);
   return (
     <>
-      <div className="fortitudo-file-actions">
+      <div className="wasmbolt-file-actions">
         {children}
         <button
           title="Find in output (Ctrl/Cmd+F)"
@@ -99,7 +99,7 @@ export function TextOutput({
           Find
         </button>
       </div>
-      <div className="fortitudo-editor" ref={node} />
+      <div className="wasmbolt-editor" ref={node} />
     </>
   );
 }

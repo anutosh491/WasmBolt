@@ -47,9 +47,10 @@ it('saves navigation and layout reset without losing edits', async () => {
       widgets: [
         'outputs',
         'source',
+        'explorer',
         'diagnostics',
-        'files',
         'terminal',
+        'debugger',
         'run',
         'pipelines'
       ],

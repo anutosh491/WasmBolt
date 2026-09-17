@@ -8,19 +8,23 @@ import {
   useSyncExternalStore
 } from 'react';
 
+import type { IClangdClient } from '../clangd/types';
 import { CommandIDs } from '../commands';
 import type { Diagnostic, Options, OutputKind } from '../compiler/types';
 import type { Pane } from '../model';
 import type { IStore } from '../state';
 import { Editor } from './editor';
+import { Debugger } from './debug';
+import { Explorer } from './explorer';
 import { Guide } from './guide';
-import { Files, Output } from './outputs';
+import { Output } from './outputs';
 import { Pipelines, Run, Terminal } from './tools';
 import { Controls, Diagnostics, Source } from './views';
 
 interface IBridgeProps {
   store: IStore;
   commands: CommandRegistry;
+  clangd: IClangdClient;
   pane: Pane | 'controls';
   output?: OutputKind;
   canShare?: boolean;
@@ -55,11 +59,34 @@ export function Bridge(props: IBridgeProps): React.ReactElement {
       onOptions: (options: Options) =>
         execute(CommandIDs.setOptions, { options }),
       onCompile: () => execute(CommandIDs.compile),
+      onCompileAndRun: () => execute(CommandIDs.compileAndRun),
       onCancel: () => execute(CommandIDs.cancel),
       onResetLayout: () => execute(CommandIDs.resetLayout),
       onCompare: () => execute(CommandIDs.compare),
       onShare: () => execute(CommandIDs.share),
       onResetExample: () => execute(CommandIDs.resetExample),
+      onCreateFile: (name: string) => execute(CommandIDs.createFile, { name }),
+      onImportFile: (name: string, data: Uint8Array) =>
+        execute(CommandIDs.importFile, { name, data }),
+      onSelectFile: (path: string) => execute(CommandIDs.selectFile, { path }),
+      onShowDebugger: () => execute(CommandIDs.showDebugger),
+      onToggleBreakpoint: (line: number) =>
+        execute(CommandIDs.toggleBreakpoint, {
+          path: store.state.activeFile,
+          line
+        }),
+      onStartDebugging: () => execute(CommandIDs.startDebugging),
+      onContinueDebugging: () => execute(CommandIDs.continueDebugging),
+      onPauseDebugging: () => execute(CommandIDs.pauseDebugging),
+      onStepOver: () => execute(CommandIDs.stepOver),
+      onStepIn: () => execute(CommandIDs.stepIn),
+      onStepOut: () => execute(CommandIDs.stepOut),
+      onRestartDebugging: () => execute(CommandIDs.restartDebugging),
+      onStopDebugging: () => execute(CommandIDs.stopDebugging),
+      onSelectFrame: (frameId: number) =>
+        execute(CommandIDs.selectDebugFrame, { frameId }),
+      onDebugCommand: (command: string) =>
+        execute(CommandIDs.debugCommand, { command }),
       onRun: () => execute(CommandIDs.run),
       onStop: () => execute(CommandIDs.stop),
       onCommand: (command: string) =>
@@ -99,12 +126,16 @@ export function Bridge(props: IBridgeProps): React.ReactElement {
         <Source state={state}>
           <Editor
             store={store}
-            language={state.options.language}
+            clangd={props.clangd}
+            path={state.activeFile}
             onChange={callbacks.onChange}
             onResetExample={callbacks.onResetExample}
+            onToggleBreakpoint={callbacks.onToggleBreakpoint}
           />
         </Source>
       );
+    case 'explorer':
+      return <Explorer state={state} {...callbacks} />;
     case 'outputs':
     case 'comparison':
       return (
@@ -116,12 +147,12 @@ export function Bridge(props: IBridgeProps): React.ReactElement {
       );
     case 'diagnostics':
       return <Diagnostics state={state} onNavigate={callbacks.onNavigate} />;
-    case 'files':
-      return <Files state={state} {...callbacks} />;
     case 'run':
       return <Run state={state} {...callbacks} />;
     case 'terminal':
       return <Terminal state={state} {...callbacks} />;
+    case 'debugger':
+      return <Debugger state={state} {...callbacks} />;
     case 'pipelines':
       return <Pipelines state={state} {...callbacks} />;
   }

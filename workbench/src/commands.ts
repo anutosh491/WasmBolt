@@ -6,14 +6,16 @@ import { assemblyText } from './compiler/assembly';
 import type { IRunner } from './compiler/execution';
 import { isTimeout } from './compiler/execution';
 import { command } from './compiler/terminal';
-import { isOptions, isOutputKind, sourceName } from './compiler/types';
-import type { File, ICompiler, Progress } from './compiler/types';
+import { isOptions, isOutputKind } from './compiler/types';
+import type { File, ICompiler, OutputKind, Progress } from './compiler/types';
 import { examples } from './examples';
+import type { IDebuggerClient } from './lldb/debugger';
 import { canRun, currentModule, hasComparison, snapshot, stale } from './model';
 import type { Pane } from './model';
 import { session } from './persistence';
 import type { ISharing } from './share';
 import type { IStore } from './state';
+import { workspacePath } from './workspace';
 
 export namespace CommandIDs {
   export const open = 'fortitudo:open';
@@ -21,6 +23,7 @@ export namespace CommandIDs {
   export const setSource = 'fortitudo:set-source';
   export const setOptions = 'fortitudo:set-options';
   export const compile = 'fortitudo:compile';
+  export const compileAndRun = 'fortitudo:compile-and-run';
   export const cancel = 'fortitudo:cancel';
   export const resetLayout = 'fortitudo:reset-layout';
   export const saveLayout = 'fortitudo:save-layout';
@@ -28,6 +31,21 @@ export namespace CommandIDs {
   export const selectOutput = 'fortitudo:select-output';
   export const compare = 'fortitudo:compare';
   export const resetExample = 'fortitudo:reset-example';
+  export const createFile = 'fortitudo:create-file';
+  export const importFile = 'fortitudo:import-file';
+  export const selectFile = 'fortitudo:select-file';
+  export const showDebugger = 'fortitudo:show-debugger';
+  export const toggleBreakpoint = 'fortitudo:toggle-breakpoint';
+  export const startDebugging = 'fortitudo:start-debugging';
+  export const continueDebugging = 'fortitudo:continue-debugging';
+  export const pauseDebugging = 'fortitudo:pause-debugging';
+  export const stepOver = 'fortitudo:step-over';
+  export const stepIn = 'fortitudo:step-in';
+  export const stepOut = 'fortitudo:step-out';
+  export const restartDebugging = 'fortitudo:restart-debugging';
+  export const stopDebugging = 'fortitudo:stop-debugging';
+  export const selectDebugFrame = 'fortitudo:select-debug-frame';
+  export const debugCommand = 'fortitudo:debug-command';
   export const runCommand = 'fortitudo:run-command';
   export const clearTerminal = 'fortitudo:clear-terminal';
   export const run = 'fortitudo:run';
@@ -46,6 +64,7 @@ export interface ICommandContext {
   readonly store: IStore;
   readonly compiler: ICompiler;
   readonly runner: IRunner;
+  readonly debugger?: IDebuggerClient;
   readonly sharing?: ISharing;
   resetLayout(): void;
   compare(): void;
@@ -59,7 +78,7 @@ export function registerCommands(
   commands: CommandRegistry,
   context: ICommandContext
 ): IDisposable {
-  const { store, compiler, runner } = context;
+  const { store, compiler, runner, debugger: debuggerClient } = context;
   const disposables = new DisposableSet();
   let sequence = 0;
   let disposed = false;
@@ -67,8 +86,69 @@ export function registerCommands(
   const idle = () => !disposed && store.state.active === null;
   const add = (id: string, options: CommandRegistry.ICommandOptions) =>
     disposables.add(commands.addCommand(id, options));
+  const debugActive = () =>
+    ['starting', 'running', 'stopped'].includes(store.state.debugger.status);
 
-  async function build(compile: boolean): Promise<void> {
+  const unsubscribeDebugger = debuggerClient?.subscribe(event => {
+    switch (event.type) {
+      case 'status':
+        store.dispatch({
+          type: 'debug-status',
+          status: event.status,
+          message: event.message
+        });
+        break;
+      case 'breakpoints':
+        store.dispatch({
+          type: 'debug-breakpoints',
+          path: event.path,
+          breakpoints: event.breakpoints
+        });
+        break;
+      case 'stopped': {
+        store.dispatch({
+          type: 'debug-stopped',
+          frames: event.frames,
+          frameId: event.frameId,
+          variables: event.variables,
+          reason: event.reason
+        });
+        const frame = event.frames.find(frame => frame.id === event.frameId);
+        if (frame?.path && frame.line) {
+          if (store.state.files.some(file => file.path === frame.path)) {
+            store.dispatch({ type: 'file-select', path: frame.path });
+          }
+          store.dispatch({ type: 'navigate', line: frame.line, column: 1 });
+        }
+        break;
+      }
+      case 'running':
+        store.dispatch({ type: 'debug-running' });
+        break;
+      case 'exited':
+        store.dispatch({ type: 'debug-exited', exitCode: event.exitCode });
+        break;
+      case 'frame':
+        store.dispatch({
+          type: 'debug-frame',
+          frameId: event.frameId,
+          variables: event.variables
+        });
+        break;
+      case 'console':
+        store.dispatch({
+          type: 'debug-console',
+          channel: event.channel,
+          text: event.text
+        });
+        break;
+      case 'error':
+        store.dispatch({ type: 'debug-error', message: event.message });
+        break;
+    }
+  });
+
+  async function build(compile: boolean, output?: OutputKind): Promise<void> {
     if (!idle()) {
       return;
     }
@@ -88,7 +168,14 @@ export function registerCommands(
       store.dispatch({ type: 'initialized', id, info, compile });
       if (compile) {
         const result = await compiler.compile(
-          { id, source, options },
+          {
+            id,
+            source,
+            sourcePath: store.state.activeFile,
+            files: store.state.files,
+            options,
+            output: output ?? store.state.outputs.primary
+          },
           progress
         );
         if (!disposed && store.state.active?.id === id) {
@@ -114,6 +201,11 @@ export function registerCommands(
     label: 'Compile',
     isEnabled: idle,
     execute: () => build(true)
+  });
+  add(CommandIDs.compileAndRun, {
+    label: 'Compile and Run',
+    isEnabled: () => commands.isEnabled(CommandIDs.run),
+    execute: () => commands.execute(CommandIDs.run)
   });
   add(CommandIDs.cancel, {
     label: 'Cancel',
@@ -150,6 +242,202 @@ export function registerCommands(
         type: 'source',
         source: examples[store.state.options.language]
       });
+    }
+  });
+  add(CommandIDs.createFile, {
+    label: 'New file',
+    execute: args => {
+      if (typeof args.name !== 'string') {
+        throw new Error('A file name is required.');
+      }
+      store.dispatch({ type: 'file-create', path: workspacePath(args.name) });
+    }
+  });
+  add(CommandIDs.importFile, {
+    label: 'Import file',
+    execute: args => {
+      if (typeof args.name !== 'string' || !(args.data instanceof Uint8Array)) {
+        throw new Error('The imported file is invalid.');
+      }
+      store.dispatch({
+        type: 'file-import',
+        path: workspacePath(args.name),
+        data: args.data
+      });
+    }
+  });
+  add(CommandIDs.selectFile, {
+    label: 'Open file',
+    execute: args => {
+      if (
+        typeof args.path !== 'string' ||
+        !store.state.files.some(file => file.path === args.path)
+      ) {
+        throw new Error('The selected file is not in the workspace.');
+      }
+      store.dispatch({ type: 'file-select', path: args.path });
+    }
+  });
+  add(CommandIDs.showDebugger, {
+    label: 'Open debugger',
+    execute: () => context.activatePane('debugger')
+  });
+  add(CommandIDs.toggleBreakpoint, {
+    label: 'Toggle breakpoint',
+    execute: async args => {
+      if (
+        typeof args.path !== 'string' ||
+        typeof args.line !== 'number' ||
+        !Number.isInteger(args.line) ||
+        args.line < 1
+      ) {
+        throw new Error('The breakpoint location is invalid.');
+      }
+      store.dispatch({
+        type: 'debug-toggle-breakpoint',
+        path: args.path,
+        line: args.line
+      });
+      if (debuggerClient && debugActive()) {
+        const lines = store.state.debugger.breakpoints
+          .filter(breakpoint => breakpoint.path === args.path)
+          .map(breakpoint => breakpoint.line);
+        try {
+          await debuggerClient.setBreakpoints(args.path, lines);
+        } catch (error) {
+          store.dispatch({ type: 'debug-error', message: String(error) });
+        }
+      }
+    }
+  });
+  add(CommandIDs.startDebugging, {
+    label: 'Start debugging',
+    isEnabled: () => !debugActive(),
+    execute: async () => {
+      if (!debuggerClient) {
+        store.dispatch({
+          type: 'debug-error',
+          message: 'The LLDB-DAP debugger is not available in this build.'
+        });
+        return;
+      }
+      const module =
+        store.state.execution.module ??
+        store.state.files.find(file => file.path.endsWith('.wasm'))?.path;
+      if (!module) {
+        store.dispatch({
+          type: 'debug-error',
+          message: 'Select a WebAssembly module in Explorer first.'
+        });
+        return;
+      }
+      context.activatePane('debugger');
+      store.dispatch({ type: 'debug-status', status: 'starting', module });
+      try {
+        await debuggerClient.start({
+          module,
+          files: store.state.files,
+          sourcePaths: store.state.editableFiles,
+          breakpoints: store.state.debugger.breakpoints,
+          argv: []
+        });
+      } catch (error) {
+        store.dispatch({ type: 'debug-error', message: String(error) });
+      }
+    }
+  });
+  const controls: readonly Readonly<{
+    id: string;
+    label: string;
+    enabled(): boolean;
+    run(): Promise<void>;
+  }>[] = [
+    {
+      id: CommandIDs.continueDebugging,
+      label: 'Continue',
+      enabled: () => store.state.debugger.status === 'stopped',
+      run: () => debuggerClient?.continue() ?? Promise.resolve()
+    },
+    {
+      id: CommandIDs.pauseDebugging,
+      label: 'Pause',
+      enabled: () => store.state.debugger.status === 'running',
+      run: () => debuggerClient?.pause() ?? Promise.resolve()
+    },
+    {
+      id: CommandIDs.stepOver,
+      label: 'Step over',
+      enabled: () => store.state.debugger.status === 'stopped',
+      run: () => debuggerClient?.stepOver() ?? Promise.resolve()
+    },
+    {
+      id: CommandIDs.stepIn,
+      label: 'Step into',
+      enabled: () => store.state.debugger.status === 'stopped',
+      run: () => debuggerClient?.stepIn() ?? Promise.resolve()
+    },
+    {
+      id: CommandIDs.stepOut,
+      label: 'Step out',
+      enabled: () => store.state.debugger.status === 'stopped',
+      run: () => debuggerClient?.stepOut() ?? Promise.resolve()
+    },
+    {
+      id: CommandIDs.restartDebugging,
+      label: 'Restart',
+      enabled: debugActive,
+      run: () => debuggerClient?.restart() ?? Promise.resolve()
+    }
+  ];
+  for (const control of controls) {
+    add(control.id, {
+      label: control.label,
+      isEnabled: () => !!debuggerClient && control.enabled(),
+      execute: async () => {
+        try {
+          await control.run();
+        } catch (error) {
+          store.dispatch({ type: 'debug-error', message: String(error) });
+        }
+      }
+    });
+  }
+  add(CommandIDs.stopDebugging, {
+    label: 'Stop debugging',
+    isEnabled: () => !!debuggerClient && debugActive(),
+    execute: async () => {
+      try {
+        await debuggerClient?.stop();
+        store.dispatch({ type: 'debug-reset' });
+      } catch (error) {
+        store.dispatch({ type: 'debug-error', message: String(error) });
+      }
+    }
+  });
+  add(CommandIDs.selectDebugFrame, {
+    label: 'Select stack frame',
+    execute: async args => {
+      if (typeof args.frameId !== 'number' || !Number.isInteger(args.frameId)) {
+        throw new Error('The stack frame is invalid.');
+      }
+      try {
+        await debuggerClient?.selectFrame(args.frameId);
+      } catch (error) {
+        store.dispatch({ type: 'debug-error', message: String(error) });
+      }
+    }
+  });
+  add(CommandIDs.debugCommand, {
+    label: 'Run LLDB command',
+    execute: async args => {
+      if (typeof args.command !== 'string' || !args.command.trim()) {
+        throw new Error('An LLDB command is required.');
+      }
+      try {
+        await debuggerClient?.command(args.command);
+      } catch (error) {
+        store.dispatch({ type: 'debug-error', message: String(error) });
+      }
     }
   });
   add(CommandIDs.resetLayout, {
@@ -236,18 +524,13 @@ export function registerCommands(
         return;
       }
       const id = ++sequence;
-      const path = `/workspace/${sourceName(store.state.options.language)}`;
-      const files = [
-        ...store.state.files.filter(file => file.path !== path),
-        { path, data: new TextEncoder().encode(store.state.source) }
-      ];
       store.dispatch({ type: 'begin', id });
       try {
         const result = await compiler.command(
           {
             id,
             command: args.command,
-            files
+            files: store.state.files
           },
           progress => store.dispatch({ type: 'progress', id, progress })
         );
@@ -330,7 +613,7 @@ export function registerCommands(
       let id: number | null = null;
       try {
         if (!currentModule(store.state)) {
-          await build(true);
+          await build(true, 'wasm');
         }
         if (disposed) {
           return;
@@ -440,12 +723,16 @@ export function registerCommands(
     }
     for (const id of [
       CommandIDs.compile,
+      CommandIDs.compileAndRun,
       CommandIDs.cancel,
       CommandIDs.initialize,
       CommandIDs.compare,
       CommandIDs.run,
       CommandIDs.stop,
-      CommandIDs.runCommand
+      CommandIDs.runCommand,
+      CommandIDs.startDebugging,
+      CommandIDs.stopDebugging,
+      ...controls.map(control => control.id)
     ]) {
       commands.notifyCommandChanged(id);
     }
@@ -457,6 +744,7 @@ export function registerCommands(
     dispose() {
       if (!disposed) {
         disposed = true;
+        unsubscribeDebugger?.();
         unsubscribe();
         compiler.cancel();
         runner.reset();

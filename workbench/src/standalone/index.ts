@@ -12,13 +12,13 @@ import '../../style/standalone.css';
 const commands = new CommandRegistry();
 const sharing = createSharing(new URL(location.href));
 const key = 'fortitudo:session:v1';
-const host = document.getElementById('fortitudo');
+const host = document.getElementById('wasmbolt');
 if (!host) {
-  throw new Error('The Fortitudo page attachment is missing.');
+  throw new Error('The WasmBolt page attachment is missing.');
 }
 const button = document.createElement('button');
-button.textContent = 'Open Fortitudo';
-button.className = 'fortitudo-open';
+button.textContent = 'Open WasmBolt';
+button.className = 'wasmbolt-open';
 host.appendChild(button);
 let current: Workbench | null = null;
 let opening: Promise<void> | null = null;
@@ -34,6 +34,7 @@ function open(): Promise<void> {
     const workbench = await createWorkbench({
       commands,
       sharing,
+      preloadCompiler: true,
       workerUrl: new URL('compiler/worker.js', document.baseURI),
       persistence: {
         load: async () => {
@@ -61,7 +62,7 @@ function open(): Promise<void> {
 
 function report(error: unknown): void {
   button.hidden = false;
-  button.textContent = `Unable to open Fortitudo. Retry: ${String(error)}`;
+  button.textContent = `Unable to open WasmBolt. Retry: ${String(error)}`;
 }
 
 button.addEventListener('click', () => {

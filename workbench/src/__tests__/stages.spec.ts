@@ -83,7 +83,13 @@ function setup(failure: 'link' | 'optimization') {
 it('keeps independent outputs when linking fails', async () => {
   const { service } = setup('link');
   const result = await service.compile(
-    { id: 1, source: 'int x;', options },
+    {
+      id: 1,
+      source: 'int x;',
+      sourcePath: '/workspace/snippet.cpp',
+      files: [],
+      options
+    },
     () => {}
   );
   expect(result.exitCode).toBe(1);
@@ -104,7 +110,13 @@ it('keeps independent outputs when linking fails', async () => {
 it('skips dependent stages after a failed optimization', async () => {
   const { service, calls } = setup('optimization');
   const result = await service.compile(
-    { id: 1, source: 'int x;', options },
+    {
+      id: 1,
+      source: 'int x;',
+      sourcePath: '/workspace/snippet.cpp',
+      files: [],
+      options
+    },
     () => {}
   );
   expect(result.artifacts.map(artifact => artifact.kind)).toEqual([

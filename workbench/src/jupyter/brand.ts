@@ -8,7 +8,7 @@ let logo: Widget | null = null;
 // Bundled only by lite/brand; installed JupyterLab keeps its own branding.
 const plugin: JupyterFrontEndPlugin<void> = {
   id: 'fortitudo:lite-brand',
-  description: 'Link the JupyterLite logo to the Fortitudo home page.',
+  description: 'Link the JupyterLite logo to the WasmBolt home page.',
   autoStart: true,
   optional: [ILabShell],
   activate: (_, shell: ILabShell | null) => {
@@ -17,8 +17,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
     }
     const link = document.createElement('a');
     link.href = '/';
-    link.title = 'Fortitudo home';
-    link.setAttribute('aria-label', 'Fortitudo home');
+    link.title = 'WasmBolt home';
+    link.setAttribute('aria-label', 'WasmBolt home');
     link.style.display = 'flex';
     link.style.alignItems = 'center';
     link.style.padding = '0 8px';

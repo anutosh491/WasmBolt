@@ -1,4 +1,12 @@
-import { canRun, initial, options, reduce, snapshot, stale } from '../model';
+import {
+  canRun,
+  currentModule,
+  initial,
+  options,
+  reduce,
+  snapshot,
+  stale
+} from '../model';
 import type { Result } from '../compiler/types';
 import { createStore } from '../state';
 import { session } from '../persistence';
@@ -50,6 +58,26 @@ it('associates output with its original input', () => {
   expect(finished.source).toBe('new source');
   expect(stale(finished)).toBe(true);
   expect(finished.result?.revision).toBe(0);
+});
+
+it('does not make an old Wasm module current after a partial build', () => {
+  const wasm = {
+    path: '/workspace/program.wasm',
+    data: Uint8Array.of(0, 97, 115, 109, 1, 0, 0, 0)
+  };
+  const imported = reduce(initial(), {
+    type: 'file-import',
+    path: wasm.path,
+    data: wasm.data
+  });
+  const edited = reduce(imported, { type: 'source', source: 'edited' });
+  const started = reduce(edited, { type: 'begin', id: 2 });
+  const finished = reduce(started, {
+    type: 'finished',
+    id: 2,
+    result: { ...result, id: 2, files: [wasm] }
+  });
+  expect(currentModule(finished)).toBe(false);
 });
 
 it('ignores a response after cancellation or a newer request', () => {
@@ -127,11 +155,12 @@ it('validates saved inputs and pane identities', () => {
   const layout = {
     type: 'tab-area',
     widgets: [
+      'explorer',
       'source',
       'outputs',
       'diagnostics',
-      'files',
       'terminal',
+      'debugger',
       'run',
       'pipelines'
     ],
@@ -163,14 +192,40 @@ it('keeps output selections applicable when language and target change', () => {
   expect(initial(saved).outputs).toEqual(state.outputs);
 });
 
-it('changes untouched examples but preserves edited source', () => {
+it('switches source files without discarding edits', () => {
   const original = initial();
   const mlir = { ...original.options, language: 'mlir' as const };
   expect(reduce(original, { type: 'options', options: mlir }).source).toContain(
     'func.func'
   );
   const edited = reduce(original, { type: 'source', source: 'my experiment' });
-  expect(reduce(edited, { type: 'options', options: mlir }).source).toBe(
-    'my experiment'
+  const changed = reduce(edited, { type: 'options', options: mlir });
+  expect(changed.source).toContain('func.func');
+  const selected = reduce(changed, {
+    type: 'file-select',
+    path: '/workspace/snippet.cpp'
+  });
+  expect(selected.source).toBe('my experiment');
+  expect(selected.revision).toBe(changed.revision + 1);
+  expect(snapshot(selected).activeFile).toBe('/workspace/snippet.cpp');
+});
+
+it('creates and imports workspace files without corrupting binary data', () => {
+  const original = initial();
+  const created = reduce(original, {
+    type: 'file-create',
+    path: '/workspace/new.c'
+  });
+  expect(created.activeFile).toBe('/workspace/new.c');
+  expect(created.options.language).toBe('c');
+  const bytes = Uint8Array.of(0, 97, 115, 109);
+  const imported = reduce(created, {
+    type: 'file-import',
+    path: '/workspace/module.wasm',
+    data: bytes
+  });
+  expect(imported.files.find(file => file.path.endsWith('.wasm'))?.data).toBe(
+    bytes
   );
+  expect(imported.activeFile).toBe('/workspace/new.c');
 });

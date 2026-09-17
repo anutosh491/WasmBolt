@@ -18,7 +18,13 @@ describe('compiler requests', () => {
   });
 
   it('constructs the requested compiler pipeline', () => {
-    const request = { id: 1, source: '', options };
+    const request = {
+      id: 1,
+      source: '',
+      sourcePath: '/workspace/request-1/snippet.cpp',
+      files: [],
+      options
+    };
     const plan = invocation(request, info, '/workspace/request-1');
     expect(plan.steps.map(step => step.name)).toEqual([
       'ast',
@@ -39,11 +45,34 @@ describe('compiler requests', () => {
     expect(plan.source).toBe('/workspace/request-1/snippet.cpp');
   });
 
+  it('plans only a selected output and its prerequisites', () => {
+    const plan = invocation(
+      {
+        id: 2,
+        source: '',
+        sourcePath: '/workspace/request-2/snippet.cpp',
+        files: [],
+        options,
+        output: 'wasm'
+      },
+      info,
+      '/workspace/request-2'
+    );
+    expect(plan.steps.map(step => step.name)).toEqual([
+      'ir',
+      'optimized',
+      'object',
+      'wasm'
+    ]);
+  });
+
   it('does not supply the Wasm sysroot to native targets', () => {
     const plan = invocation(
       {
         id: 2,
         source: '',
+        sourcePath: '/workspace/request-2/snippet.c',
+        files: [],
         options: {
           ...options,
           language: 'c',

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as React from 'react';
 
 import { isTimeout } from '../compiler/execution';
@@ -14,7 +14,7 @@ export function Pipelines({
   onOptions(options: Options): void;
 }): React.ReactElement {
   return (
-    <section className="fortitudo-form" aria-label="Pipelines pane">
+    <section className="wasmbolt-form" aria-label="Pipelines pane">
       {state.options.language !== 'mlir' && (
         <>
           <label>
@@ -58,7 +58,7 @@ export function Pipelines({
           />
         </label>
       )}
-      <p className="fortitudo-hint">
+      <p className="wasmbolt-hint">
         {state.options.language === 'mlir'
           ? 'MLIR produces transformed IR and an operation graph.'
           : 'Leave the LLVM pipeline empty to follow the optimization level.'}
@@ -77,50 +77,73 @@ export function Terminal({
   onClear(): void;
 }): React.ReactElement {
   const [command, setCommand] = useState('');
+  const output = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    output.current?.scrollTo({ top: output.current.scrollHeight });
+  }, [state.terminal]);
   return (
-    <section className="fortitudo-pane" aria-label="Terminal pane">
-      <div className="fortitudo-caption">
-        <span>clang · clang++ · opt · llc · wasm-ld · mlir-opt · dot</span>
-        <button onClick={onClear}>Clear log</button>
+    <section className="wasmbolt-terminal" aria-label="Terminal pane">
+      <div className="wasmbolt-terminal-title">
+        <strong>Terminal</strong>
+        <span className="wasmbolt-terminal-actions">
+          <span aria-hidden="true">›_ wasmbolt</span>
+          <button
+            className="wasmbolt-icon-button"
+            title="Clear terminal"
+            aria-label="Clear terminal"
+            onClick={onClear}
+          >
+            ⌫
+          </button>
+        </span>
       </div>
-      <pre className="fortitudo-output" aria-label="Command log">
-        {state.terminal
-          .map(stage =>
-            [
-              ...stage.commands.map(command => `$ ${command}`),
-              stage.stdout,
-              stage.stderr,
-              `Exit ${stage.exitCode} · ${Math.round(stage.duration)} ms`
-            ]
-              .filter(Boolean)
-              .join('\n')
-          )
-          .join('\n\n') ||
-          'Working directory: /workspace. Compile replaces the workspace.'}
-      </pre>
-      <form
-        className="fortitudo-command-line"
-        onSubmit={event => {
-          event.preventDefault();
-          if (command.trim() && !state.active) {
-            onCommand(command);
-            setCommand('');
-          }
-        }}
+      <div
+        ref={output}
+        className="wasmbolt-terminal-output"
+        aria-label="Command log"
       >
-        <input
-          aria-label="Compiler command"
-          value={command}
-          placeholder={
-            'opt "-passes=print<domtree>" -disable-output optimized.ll'
-          }
-          onChange={event => setCommand(event.target.value)}
-          spellCheck={false}
-        />
-        <button type="submit" disabled={!!state.active || !command.trim()}>
-          Run command
-        </button>
-      </form>
+        {state.terminal.flatMap((stage, stageIndex) => [
+          ...stage.commands.map((line, index) => (
+            <div
+              className="wasmbolt-terminal-command"
+              key={`${stageIndex}-${index}`}
+            >
+              <span className="wasmbolt-prompt">wasmbolt:/workspace $</span>{' '}
+              <span>{line}</span>
+            </div>
+          )),
+          stage.stdout && <pre key={`${stageIndex}-out`}>{stage.stdout}</pre>,
+          stage.stderr && (
+            <pre className="wasmbolt-terminal-error" key={`${stageIndex}-err`}>
+              {stage.stderr}
+            </pre>
+          ),
+          stage.exitCode !== 0 && (
+            <div className="wasmbolt-terminal-error" key={`${stageIndex}-code`}>
+              [exit {stage.exitCode}]
+            </div>
+          )
+        ])}
+        <form
+          className="wasmbolt-command-line"
+          onSubmit={event => {
+            event.preventDefault();
+            if (command.trim() && !state.active) {
+              onCommand(command);
+              setCommand('');
+            }
+          }}
+        >
+          <span className="wasmbolt-prompt">wasmbolt:/workspace $</span>
+          <input
+            aria-label="Compiler command"
+            value={command}
+            placeholder="Type a compiler command"
+            onChange={event => setCommand(event.target.value)}
+            spellCheck={false}
+          />
+        </form>
+      </div>
     </section>
   );
 }
@@ -148,8 +171,8 @@ export function Run({
     execution.result?.status === 'success' ? execution.result.value : null;
   const returned = value === null ? 'void' : String(value);
   return (
-    <section className="fortitudo-form" aria-label="Run pane">
-      <div className="fortitudo-run-controls">
+    <section className="wasmbolt-form" aria-label="Run pane">
+      <div className="wasmbolt-run-controls">
         <label>
           Export
           <select
@@ -199,12 +222,12 @@ export function Run({
         )}
       </div>
       {execution.module !== null && !currentModule(state) && (
-        <p className="fortitudo-hint">
+        <p className="wasmbolt-hint">
           Out of date — Run rebuilds source when WebAssembly is selected.
         </p>
       )}
       {!execution.module && (
-        <p className="fortitudo-hint">
+        <p className="wasmbolt-hint">
           {canRun(state)
             ? 'Run compiles your source and calls an exported function.'
             : 'Choose WebAssembly to run your code, or use a Wasm file.'}
@@ -223,7 +246,7 @@ export function Run({
         </p>
       )}
       {(execution.notice || execution.result?.status === 'failed') && (
-        <p role="alert" className="fortitudo-error">
+        <p role="alert" className="wasmbolt-error">
           {execution.notice ||
             (execution.result?.status === 'failed'
               ? execution.result.message
@@ -257,7 +280,7 @@ export function Run({
             }}
           />
         </label>
-        <p className="fortitudo-hint">
+        <p className="wasmbolt-hint">
           Pointer and aggregate values are not supported. Calls retain module
           state until reset.
         </p>

@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import * as React from 'react';
 
 import {
@@ -10,13 +11,14 @@ import {
   targets
 } from '../compiler/types';
 import type { Diagnostic, Options } from '../compiler/types';
-import { canRun, hasComparison, stale } from '../model';
+import { canRun, stale } from '../model';
 import type { State } from '../model';
 
 interface IControlsProps {
   state: State;
   onOptions(options: Options): void;
   onCompile(): void;
+  onCompileAndRun(): void;
   onCancel(): void;
   onResetLayout(): void;
   onRun(): void;
@@ -24,23 +26,22 @@ interface IControlsProps {
   onShare?(): void;
   onStop(): void;
   onGuide(): void;
+  onImportFile(name: string, data: Uint8Array): void;
+  onShowDebugger(): void;
 }
 
 export function Controls(props: IControlsProps): React.ReactElement {
   const { state, onOptions } = props;
   const busy = state.active !== null;
-  const comparing = hasComparison(state.layout);
   const downloads =
     state.progress?.phase === 'downloading' ? state.progress.downloads : null;
   const loaded = downloads?.reduce((sum, item) => sum + item.loaded, 0) ?? 0;
   const total = downloads?.reduce((sum, item) => sum + item.total, 0) ?? 0;
+  const wasm = useRef<HTMLInputElement>(null);
   return (
-    <div className="fortitudo-controls">
-      <div className="fortitudo-toolbar">
-        <strong className="fortitudo-brand">
-          <span className="fortitudo-icon" aria-hidden="true" />
-          Fortitudo
-        </strong>
+    <div className="wasmbolt-controls">
+      <div className="wasmbolt-toolbar">
+        <strong className="wasmbolt-brand">WasmBolt</strong>
         <label>
           <span>Language</span>
           <select
@@ -114,49 +115,54 @@ export function Controls(props: IControlsProps): React.ReactElement {
             </label>
           </>
         )}
-        <div className="fortitudo-actions">
+        <div className="wasmbolt-actions">
           <button
-            className="fortitudo-primary"
+            className="wasmbolt-primary"
             onClick={props.onCompile}
             disabled={busy}
             title="Compile (Ctrl/Cmd+Enter)"
           >
             {state.status === 'failed' ? 'Retry compilation' : 'Compile'}
           </button>
-          {busy && <button onClick={props.onCancel}>Cancel</button>}
-          {(state.options.language !== 'mlir' || state.execution.module) &&
-            (state.execution.active ? (
-              <button onClick={props.onStop}>Stop</button>
-            ) : (
-              <button
-                onClick={props.onRun}
-                disabled={!canRun(state)}
-                title={
-                  state.options.target === 'wasm32-unknown-emscripten'
-                    ? 'Compile if needed, then run a WebAssembly function'
-                    : 'Select WebAssembly to run your code'
-                }
-              >
-                Run
-              </button>
-            ))}
           <button
-            onClick={props.onCompare}
-            aria-pressed={comparing}
-            title={comparing ? 'Close comparison' : 'Compare outputs'}
+            onClick={props.onCompileAndRun}
+            disabled={!canRun(state)}
+            title="Compile the selected file if needed, then run it"
           >
-            Compare
+            Compile and Run
           </button>
-          {props.onShare && <button onClick={props.onShare}>Share</button>}
-          <button onClick={props.onGuide}>Guide</button>
-          <button onClick={props.onResetLayout}>Reset layout</button>
+          {busy && <button onClick={props.onCancel}>Cancel</button>}
+          <button
+            aria-label="Open debugger"
+            title="Open debugger"
+            onClick={props.onShowDebugger}
+          >
+            🐞
+          </button>
+          <button onClick={() => wasm.current?.click()}>Load Wasm</button>
+          <input
+            ref={wasm}
+            className="wasmbolt-visually-hidden"
+            type="file"
+            accept=".wasm,application/wasm"
+            aria-label="Load WebAssembly module"
+            onChange={event => {
+              const file = event.target.files?.[0];
+              event.target.value = '';
+              if (file) {
+                void file.arrayBuffer().then(data => {
+                  props.onImportFile(file.name, new Uint8Array(data));
+                });
+              }
+            }}
+          />
         </div>
       </div>
-      <div className="fortitudo-status">
-        <div className="fortitudo-activity">
-          {busy && <span className="fortitudo-spinner" aria-hidden="true" />}
+      <div className="wasmbolt-status">
+        <div className="wasmbolt-activity">
+          {busy && <span className="wasmbolt-spinner" aria-hidden="true" />}
           <span
-            className={state.status === 'failed' ? 'fortitudo-error' : ''}
+            className={state.status === 'failed' ? 'wasmbolt-error' : ''}
             role="status"
             aria-live="polite"
           >
@@ -179,7 +185,7 @@ export function Controls(props: IControlsProps): React.ReactElement {
         </span>
       </div>
       {state.notice && (
-        <p className="fortitudo-notice" role="alert">
+        <p className="wasmbolt-notice" role="alert">
           {state.notice}
         </p>
       )}
@@ -195,11 +201,11 @@ export function Source({
   children: React.ReactNode;
 }): React.ReactElement {
   return (
-    <section className="fortitudo-pane" aria-label="Source pane">
+    <section className="wasmbolt-pane" aria-label="Source pane">
       {children}
       {(state.options.language === 'c' || state.options.language === 'cpp') &&
         state.options.target !== 'wasm32-unknown-emscripten' && (
-          <p className="fortitudo-hint">
+          <p className="wasmbolt-hint">
             This target has Clang built-in headers. Use WebAssembly for the
             packaged C/C++ system headers.
           </p>
@@ -219,22 +225,22 @@ export function Diagnostics({
   const filename = result?.sourcePath;
   return (
     <section
-      className="fortitudo-pane fortitudo-diagnostics"
+      className="wasmbolt-pane wasmbolt-diagnostics"
       aria-label="Diagnostics pane"
     >
       {stale(state) && (
-        <p className="fortitudo-hint">Out of date — compile to update</p>
+        <p className="wasmbolt-hint">Out of date — compile to update</p>
       )}
-      <div className="fortitudo-diagnostic-list">
+      <div className="wasmbolt-diagnostic-list">
         {state.status === 'loading' && (
-          <div className="fortitudo-loading">
-            <p className="fortitudo-hint">
+          <div className="wasmbolt-loading">
+            <p className="wasmbolt-hint">
               {state.progress?.phase === 'preparing'
                 ? 'Downloads complete. Preparing compiler…'
                 : 'You can keep editing while the compiler loads.'}
             </p>
             {state.progress?.phase === 'downloading' && (
-              <ul className="fortitudo-downloads" aria-label="Compiler assets">
+              <ul className="wasmbolt-downloads" aria-label="Compiler assets">
                 {state.progress.downloads.map(download => (
                   <li key={download.name}>
                     <span>{download.name}</span>
@@ -246,13 +252,13 @@ export function Diagnostics({
           </div>
         )}
         {state.status === 'failed' && state.notice && (
-          <p className="fortitudo-hint fortitudo-error">{state.notice}</p>
+          <p className="wasmbolt-hint wasmbolt-error">{state.notice}</p>
         )}
         {result?.diagnostics.length ? (
           result.diagnostics.map((diagnostic, index) => (
             <button
               key={index}
-              className="fortitudo-diagnostic"
+              className="wasmbolt-diagnostic"
               disabled={
                 stale(state) ||
                 diagnostic.file !== filename ||
@@ -267,7 +273,7 @@ export function Diagnostics({
             </button>
           ))
         ) : state.active === null && state.status !== 'failed' ? (
-          <p className="fortitudo-hint">
+          <p className="wasmbolt-hint">
             {result
               ? result.exitCode === 0
                 ? 'No errors or warnings.'
@@ -278,7 +284,7 @@ export function Diagnostics({
         {result && result.stages.length > 0 && (
           <details open={result.exitCode !== 0}>
             <summary>Build details · {Math.round(result.duration)} ms</summary>
-            <ul className="fortitudo-stages" aria-label="Compilation stages">
+            <ul className="wasmbolt-stages" aria-label="Compilation stages">
               {result.stages.map(stage => (
                 <li key={stage.name}>
                   <strong>

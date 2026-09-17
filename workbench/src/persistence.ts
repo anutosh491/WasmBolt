@@ -10,11 +10,12 @@ export interface IPersistence {
 }
 
 const panes: readonly Pane[] = [
+  'explorer',
   'source',
   'outputs',
   'diagnostics',
-  'files',
   'terminal',
+  'debugger',
   'run',
   'pipelines'
 ];
@@ -61,14 +62,45 @@ export function session(value: unknown): Session | null {
   ) {
     return null;
   }
+  const savedDocuments = documents(value.documents);
+  if (value.documents !== undefined && savedDocuments === null) {
+    return null;
+  }
   return {
     version: 2,
     source: value.source,
+    documents: savedDocuments ?? undefined,
+    activeFile:
+      typeof value.activeFile === 'string' ? value.activeFile : undefined,
     options,
     layout,
     outputs: { primary: outputs.primary, comparison: outputs.comparison },
     timeout
   };
+}
+
+function documents(
+  value: unknown
+): readonly Readonly<{ path: string; source: string }>[] | null | undefined {
+  if (value === undefined) {
+    return null;
+  }
+  if (
+    !Array.isArray(value) ||
+    !value.every(
+      document =>
+        isRecord(document) &&
+        typeof document.path === 'string' &&
+        document.path.startsWith('/workspace/') &&
+        typeof document.source === 'string'
+    )
+  ) {
+    return undefined;
+  }
+  return value.map(document => ({
+    path: String(document.path),
+    source: String(document.source)
+  }));
 }
 
 function addUtilities(area: Area): Area {
@@ -78,7 +110,14 @@ function addUtilities(area: Area): Area {
   return area.widgets.includes('diagnostics')
     ? {
         ...area,
-        widgets: [...area.widgets, 'files', 'terminal', 'run', 'pipelines']
+        widgets: [
+          ...area.widgets,
+          'explorer',
+          'terminal',
+          'debugger',
+          'run',
+          'pipelines'
+        ]
       }
     : area;
 }
@@ -90,6 +129,9 @@ function pane(value: unknown, legacy: boolean): Pane | null {
       : value === 'source' || value === 'diagnostics'
         ? value
         : null;
+  }
+  if (value === 'files') {
+    return 'explorer';
   }
   return [...panes, 'comparison' as const].find(pane => pane === value) ?? null;
 }

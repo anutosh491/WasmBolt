@@ -32,7 +32,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
     // Tracker restoration removes entries that are not widget records.
     // Keep editing state in its own namespace.
     const tracker = new WidgetTracker<Workbench>({
-      namespace: 'fortitudo-workbench'
+      namespace: 'wasmbolt-workbench'
     });
     let current: Workbench | null = null;
     let opening: Promise<void> | null = null;
@@ -44,9 +44,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
       `fortitudo:session:${path}:${workspace}`
     );
     app.commands.addCommand(CommandIDs.open, {
-      label: 'Open Fortitudo',
+      label: 'Open WasmBolt',
       caption: 'Explore compiler outputs and run WebAssembly in your browser',
-      iconClass: 'fortitudo-icon',
+      iconClass: 'wasmbolt-icon',
       execute: () => {
         if (current && !current.isDisposed) {
           if (!current.isAttached) {
@@ -78,17 +78,18 @@ const plugin: JupyterFrontEndPlugin<void> = {
                   layout: null
                 }) ?? defaults;
             } catch (error) {
-              console.warn('Fortitudo settings could not be loaded.', error);
+              console.warn('WasmBolt settings could not be loaded.', error);
             }
           }
           const workbench = await createWorkbench({
             commands: app.commands,
+            preloadCompiler: true,
             workerUrl: new URL('../../compiler/worker.js', import.meta.url),
             persistence,
             defaults
           });
           current = workbench;
-          workbench.addClass('fortitudo-jupyter');
+          workbench.addClass('wasmbolt-jupyter');
           workbench.disposed.connect(() => {
             saved = workbench.saved;
             current = null;
@@ -102,7 +103,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
         return opening;
       }
     });
-    palette?.addItem({ command: CommandIDs.open, category: 'Fortitudo' });
+    palette?.addItem({ command: CommandIDs.open, category: 'WasmBolt' });
     launcher?.add({ command: CommandIDs.open, category: 'Other', rank: 1 });
     if (restorer) {
       void restorer
@@ -111,7 +112,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
           name: () => 'workbench'
         })
         .catch(error => {
-          console.error('Fortitudo restoration failed.', error);
+          console.error('WasmBolt restoration failed.', error);
         });
     }
   }

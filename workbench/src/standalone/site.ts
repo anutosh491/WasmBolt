@@ -1,13 +1,13 @@
 import '../../style/site.css';
 
-const repository = document.getElementById('fortitudo-repository-details');
+const repository = document.getElementById('wasmbolt-repository-details');
 if (repository) {
   void showRepository(repository);
 }
 
 // GitHub metadata is optional; the packaged badge also works offline.
 async function showRepository(details: HTMLElement): Promise<void> {
-  const api = 'https://api.github.com/repos/afshin/fortitudo';
+  const api = 'https://api.github.com/repos/anutosh491/WasmBolt';
   const signal = AbortSignal.timeout(5000);
   const [repository, release] = await Promise.all([
     read(api, signal),

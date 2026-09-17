@@ -8,11 +8,12 @@ import { PanePanel } from '../ui/panels';
 
 function views() {
   return {
+    explorer: new Widget(),
     source: new Widget(),
     outputs: new Widget(),
     diagnostics: new Widget(),
-    files: new Widget(),
     terminal: new Widget(),
+    debugger: new Widget(),
     run: new Widget(),
     pipelines: new Widget(),
     comparison: new Widget()
@@ -147,16 +148,17 @@ it('folds tools without losing split proportions or the source view', () => {
   expect(panes.diagnostics.isHidden).toBe(true);
   panel.activatePane('diagnostics');
   expect(panes.diagnostics.isHidden).toBe(false);
-  expect(panel.save()).toMatchObject({ sizes: [0.75, 0.25] });
+  expect(panel.save()).toMatchObject({ sizes: [0.72, 0.28] });
   const tools = panes.diagnostics.parent?.parent;
   if (!(tools instanceof TabPanel)) {
     throw new Error('Expected the tools tab panel.');
   }
   tools.currentIndex = -1;
-  expect(panel.save()).toEqual(closed);
+  const folded = panel.save();
+  expect(folded).not.toEqual(closed);
   panel.compare();
   panel.compare();
-  expect(panel.save()).toEqual(closed);
+  expect(panel.save()).toEqual(folded);
   expect(panes.source.isDisposed).toBe(false);
   panel.dispose();
 });
@@ -172,10 +174,11 @@ it('restores collapsed tools but rejects a collapsed source area', () => {
         type: 'tab-area',
         widgets: [
           'source',
+          'explorer',
           'outputs',
           'diagnostics',
+          'debugger',
           'run',
-          'files',
           'terminal',
           'pipelines'
         ],

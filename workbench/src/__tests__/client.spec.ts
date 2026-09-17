@@ -54,7 +54,13 @@ it('cancels loading and initializes a fresh worker on retry', async () => {
 
 it('cancels between readiness and compilation', async () => {
   const { compiler, workers } = setup();
-  const pending = compiler.compile({ id: 1, source: '', options });
+  const pending = compiler.compile({
+    id: 1,
+    source: '',
+    sourcePath: '/workspace/snippet.cpp',
+    files: [],
+    options
+  });
   const rejected = expect(pending).rejects.toMatchObject({
     name: 'AbortError'
   });

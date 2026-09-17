@@ -29,6 +29,13 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function isUint8Array(value: unknown): value is Uint8Array {
+  return (
+    ArrayBuffer.isView(value) &&
+    Object.prototype.toString.call(value) === '[object Uint8Array]'
+  );
+}
+
 export function isFiles(value: unknown): value is readonly File[] {
   if (!Array.isArray(value)) {
     return false;
@@ -44,7 +51,7 @@ export function isFiles(value: unknown): value is readonly File[] {
         .slice(1)
         .some(part => !part || part === '..' || part === '.') ||
       file.path.includes('\0') ||
-      !(file.data instanceof Uint8Array) ||
+      !isUint8Array(file.data) ||
       paths.has(file.path)
     ) {
       return false;
