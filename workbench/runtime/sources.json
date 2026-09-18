@@ -1,0 +1,16 @@
+{
+  "repository": "https://github.com/anutosh491/WasmBolt",
+  "revision": "6566da129fde331db3f4f24856c7ea56c2c4d71c",
+  "emscripten": "4.0.9",
+  "llvm": "23.1.0",
+  "wabt": "1.0.39",
+  "llvmRevision": "ea7d852a70e8bdfaf601d6626a760f9771b2c4b4",
+  "debuggerRevision": "24572c2967f11f63f0d3bfd461ca59350e592349",
+  "debuggerEmscripten": "6.0.8",
+  "debuggerWamrRevision": "d7050d9fe672e2d0bc65c44c966cebc0a1aca14b",
+  "pipelineTargets": [
+    "wasm32-unknown-emscripten",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu"
+  ]
+}

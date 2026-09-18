@@ -1,0 +1,84 @@
+.wasmbolt-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 24px;
+  padding: 8px 16px;
+  border-bottom: 1px solid #d3d7dc;
+  background: #f5f6f8;
+  color: #20252c;
+  font:
+    14px system-ui,
+    sans-serif;
+}
+
+.wasmbolt-navigation-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+
+.wasmbolt-navigation .wasmbolt-brand {
+  width: auto;
+  margin-right: 0;
+}
+
+.wasmbolt-workbench .wasmbolt-brand {
+  display: none;
+}
+
+.wasmbolt-navigation a {
+  display: inline-flex;
+  box-sizing: border-box;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 2px 0;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.wasmbolt-navigation img {
+  flex: none;
+}
+
+.wasmbolt-badge-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.5;
+}
+
+.wasmbolt-badge-text small {
+  font-size: 11px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+.wasmbolt-navigation a:hover {
+  color: #365bbb;
+}
+
+.wasmbolt-navigation a:focus-visible {
+  outline: 2px solid currentcolor;
+  outline-offset: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .wasmbolt-navigation {
+    border-color: #48505b;
+    background: #242a33;
+    color: #eef1f5;
+  }
+
+  .wasmbolt-github-icon {
+    filter: invert(1);
+  }
+
+  .wasmbolt-navigation a:hover {
+    color: #91adff;
+  }
+}

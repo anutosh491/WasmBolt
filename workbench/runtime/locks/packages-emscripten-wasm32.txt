@@ -1,0 +1,4 @@
+@EXPLICIT
+https://prefix.dev/emscripten-forge-4x/noarch/emscripten-abi-4.0.9-h267e887_9.tar.bz2#25efc842dad2785871310cfa3499ca33
+https://prefix.dev/emscripten-forge-4x/emscripten-wasm32/xtl-0.8.2-h0b0027f_0.tar.bz2#0f1ab5cae41a48c05fa736a942ae5c81
+https://prefix.dev/emscripten-forge-4x/emscripten-wasm32/xtensor-0.27.1-h0b0027f_0.tar.bz2#5c14c9c71b2657f4f41102ad22d73346

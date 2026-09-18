@@ -1,0 +1,10 @@
+{
+  "jupyter-lite-schema-version": 0,
+  "jupyter-config-data": {
+    "appName": "WasmBolt",
+    "appUrl": "./lab",
+    "faviconUrl": "./icon.svg",
+    "disabledExtensions": ["@jupyterlite/application-extension:logo"],
+    "defaultKernelName": "xcpp23"
+  }
+}

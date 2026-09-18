@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    "allowSyntheticDefaultImports": true,
+    "composite": true,
+    "declaration": true,
+    "esModuleInterop": true,
+    "incremental": true,
+    "jsx": "react",
+    "lib": ["DOM", "ES2022"],
+    "module": "esnext",
+    "moduleResolution": "node",
+    "noEmitOnError": true,
+    "noImplicitAny": true,
+    "noUnusedLocals": true,
+    "preserveWatchOutput": true,
+    "resolveJsonModule": true,
+    "outDir": "lib",
+    "rootDir": "src",
+    "strict": true,
+    "strictNullChecks": true,
+    "target": "ES2022",
+    "types": []
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": [
+    "src/__tests__",
+    "src/compiler/worker.ts",
+    "src/compiler/runtime.ts",
+    "src/compiler/tool-worker.ts",
+    "src/compiler/wat-worker.ts",
+    "src/clangd/worker.ts",
+    "src/clangd/runtime.ts",
+    "src/lldb/debug-worker.ts"
+  ]
+}

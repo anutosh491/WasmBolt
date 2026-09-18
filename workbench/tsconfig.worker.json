@@ -1,0 +1,41 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["WebWorker", "ES2022"],
+    "outDir": ".cache/worker-types",
+    "tsBuildInfoFile": ".cache/worker.tsbuildinfo",
+    "types": []
+  },
+  "include": [
+    "src/compiler/worker.ts",
+    "src/compiler/utility-worker.ts",
+    "src/compiler/utility.ts",
+    "src/compiler/tool-worker.ts",
+    "src/compiler/tool-protocol.ts",
+    "src/compiler/tool.ts",
+    "src/compiler/pipeline.ts",
+    "src/compiler/runtime.ts",
+    "src/compiler/assets.ts",
+    "src/compiler/protocol.ts",
+    "src/compiler/types.ts",
+    "src/compiler/request.ts",
+    "src/compiler/diagnostics.ts",
+    "src/compiler/execution.ts",
+    "src/compiler/module.ts",
+    "src/compiler/packages.ts",
+    "src/compiler/files.ts",
+    "src/compiler/terminal.ts",
+    "src/compiler/wasm.ts",
+    "src/compiler/wat.ts",
+    "src/compiler/wat-runtime.ts",
+    "src/compiler/wat-worker.ts",
+    "src/clangd/worker.ts",
+    "src/clangd/runtime.ts",
+    "src/clangd/protocol.ts",
+    "src/lldb/debug-worker.ts",
+    "src/lldb/debug-protocol.ts",
+    "src/lldb/debugger.ts",
+    "src/lldb/phase.ts"
+  ],
+  "exclude": []
+}

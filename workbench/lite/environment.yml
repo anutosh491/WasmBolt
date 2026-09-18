@@ -1,0 +1,6 @@
+name: xeus-cpp
+channels:
+  - https://prefix.dev/emscripten-forge-4x
+  - conda-forge
+dependencies:
+  - xeus-cpp=0.10.0

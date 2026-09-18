@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "incremental": false,
+    "types": ["jest", "node"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": [
+    "src/compiler/worker.ts",
+    "src/compiler/tool-worker.ts",
+    "src/compiler/wat-worker.ts",
+    "src/clangd/worker.ts",
+    "src/clangd/runtime.ts",
+    "src/lldb/debug-worker.ts"
+  ]
+}

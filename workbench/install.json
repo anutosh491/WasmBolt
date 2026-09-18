@@ -1,0 +1,5 @@
+{
+  "packageManager": "python",
+  "packageName": "wasmbolt",
+  "uninstallInstructions": "Use your Python package manager to remove wasmbolt."
+}

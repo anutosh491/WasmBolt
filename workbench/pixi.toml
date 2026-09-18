@@ -1,0 +1,31 @@
+[workspace]
+authors = ["A. T. Darian <git@darian.at>"]
+channels = ["conda-forge"]
+name = "wasmbolt"
+platforms = ["osx-arm64", "linux-64"]
+version = "0.1.0"
+
+[dependencies]
+python = "3.12.*"
+nodejs = "24.*"
+jupyterlab = "4.6.*"
+jupyterlite-core = "0.7.*"
+python-build = ">=1.2,<2"
+hatchling = ">=1.27,<2"
+hatch-nodejs-version = ">=0.3.2,<0.4"
+micromamba = ">=2,<3"
+pip = ">=26.2.1,<27"
+twine = ">=6.2,<7"
+actionlint = ">=1.7,<2"
+empack = ">=6,<7"
+
+[pypi-dependencies]
+jupyter-builder = ">=1.2,<2"
+hatch-jupyter-builder = ">=0.9,<1"
+
+[feature.lite.dependencies]
+jupyterlite-xeus = "5.0.*"
+
+[environments]
+default = { features = [], solve-group = "default" }
+lite = { features = ["lite"], solve-group = "default" }

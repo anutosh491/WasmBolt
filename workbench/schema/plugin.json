@@ -1,0 +1,50 @@
+{
+  "title": "WasmBolt",
+  "description": "Defaults for new compiler explorer sessions.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "source": {
+      "title": "Source",
+      "type": "string",
+      "default": "int square(int x) {\n  return x * x;\n}\n"
+    },
+    "language": {
+      "title": "Language",
+      "type": "string",
+      "enum": ["c", "cpp", "llvm", "mlir"],
+      "default": "cpp"
+    },
+    "target": {
+      "title": "Target",
+      "type": "string",
+      "enum": [
+        "wasm32-unknown-emscripten",
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu"
+      ],
+      "default": "wasm32-unknown-emscripten"
+    },
+    "optimization": {
+      "title": "Optimization",
+      "type": "integer",
+      "enum": [0, 1, 2, 3],
+      "default": 2
+    },
+    "llvmPipeline": {
+      "title": "LLVM pipeline",
+      "type": "string",
+      "default": ""
+    },
+    "analysisPipeline": {
+      "title": "Analysis pipeline",
+      "type": "string",
+      "default": "print<domtree>,print<loops>"
+    },
+    "mlirPipeline": {
+      "title": "MLIR pipeline",
+      "type": "string",
+      "default": "builtin.module(canonicalize,cse,convert-arith-to-llvm,convert-func-to-llvm,reconcile-unrealized-casts)"
+    }
+  }
+}

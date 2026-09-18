@@ -1,0 +1,50 @@
+diff --git a/clang-tools-extra/clangd/JSONTransport.cpp b/clang-tools-extra/clangd/JSONTransport.cpp
+index 3c0e198433f3..b00821ccf16d 100644
+--- a/clang-tools-extra/clangd/JSONTransport.cpp
++++ b/clang-tools-extra/clangd/JSONTransport.cpp
+@@ -5,6 +5,28 @@
+ // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+ //
+ //===----------------------------------------------------------------------===//
++#ifdef __EMSCRIPTEN__
++#include "support/Shutdown.h"
++#include <emscripten.h>
++#include <type_traits>
++#include <utility>
++
++// Browser workers receive LSP messages asynchronously. Yield the Wasm stack
++// until JavaScript has queued bytes for Emscripten's stdin callback.
++EM_ASYNC_JS(void, waitForClangdStdin, (), { await Module.stdinReady(); })
++
++template <typename Fun, typename Ret = decltype(std::declval<Fun>()())>
++Ret readAfterBrowserStdin(const std::enable_if_t<true, Ret> &Fail,
++                          const Fun &Read) {
++  waitForClangdStdin();
++  return clang::clangd::retryAfterSignalUnlessShutdown(Fail, Read);
++}
++
++// Keep native clangd's transport unchanged. Only Emscripten replaces the two
++// blocking stdio reads below with an Asyncify-backed browser wait.
++#define retryAfterSignalUnlessShutdown readAfterBrowserStdin
++#endif
++
+ #include "Protocol.h" // For LSPError
+ #include "Transport.h"
+ #include "support/Cancellation.h"
+@@ -63,9 +85,15 @@ llvm::Error decodeError(const llvm::json::Object &O) {
+ class JSONTransport : public Transport {
+ public:
+   JSONTransport(std::FILE *In, llvm::raw_ostream &Out,
+                 llvm::raw_ostream *InMirror, bool Pretty, JSONStreamStyle Style)
+       : In(In), Out(Out), InMirror(InMirror ? *InMirror : llvm::nulls()),
+-        Pretty(Pretty), Style(Style) {}
++        Pretty(Pretty), Style(Style) {
++#ifdef __EMSCRIPTEN__
++    // Keep JavaScript's input queue in lockstep with stdio reads. Otherwise
++    // stdio may buffer the next header or body before the browser wait.
++    setvbuf(In, nullptr, _IONBF, 0);
++#endif
++  }
+ 
+   void notify(llvm::StringRef Method, llvm::json::Value Params) override {
+     sendMessage(llvm::json::Object{

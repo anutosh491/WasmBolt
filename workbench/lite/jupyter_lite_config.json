@@ -1,0 +1,14 @@
+{
+  "LiteBuildConfig": {
+    "no_sourcemaps": true,
+    "contents": ["files"],
+    "federated_extensions": ["../wasmbolt/labextension", "brand/labextension"]
+  },
+  "XeusAddon": {
+    "empack_config": "empack_config.yaml",
+    "default_channels": [
+      "https://prefix.dev/emscripten-forge-4x",
+      "https://conda.anaconda.org/conda-forge"
+    ]
+  }
+}
