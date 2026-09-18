@@ -84,7 +84,6 @@ export function Terminal({
   return (
     <section className="wasmbolt-terminal" aria-label="Terminal pane">
       <div className="wasmbolt-terminal-title">
-        <strong>Terminal</strong>
         <span className="wasmbolt-terminal-actions">
           <span aria-hidden="true">›_ wasmbolt</span>
           <button
@@ -138,7 +137,7 @@ export function Terminal({
           <input
             aria-label="Compiler command"
             value={command}
-            placeholder="Type a compiler command"
+            placeholder="Type a tool command or lldb <command>"
             onChange={event => setCommand(event.target.value)}
             spellCheck={false}
           />
@@ -148,7 +147,7 @@ export function Terminal({
   );
 }
 
-export function Run({
+export function Execute({
   state,
   onRun,
   onStop,
@@ -165,13 +164,17 @@ export function Run({
 }): React.ReactElement {
   const execution = state.execution;
   const fn = execution.info?.functions.find(fn => fn.name === execution.symbol);
-  const main = fn?.name === 'main' && fn.signatureCode === 2;
+  const functions = execution.info?.functions.filter(fn => fn.callable) ?? [];
+  const main =
+    fn?.name === 'main' &&
+    fn.params.length === 2 &&
+    fn.params.every(type => type === 'i32');
   const busy = execution.active !== null;
   const value =
     execution.result?.status === 'success' ? execution.result.value : null;
   const returned = value === null ? 'void' : String(value);
   return (
-    <section className="wasmbolt-form" aria-label="Run pane">
+    <section className="wasmbolt-form" aria-label="Execute pane">
       <div className="wasmbolt-run-controls">
         <label>
           Export
@@ -181,10 +184,9 @@ export function Run({
             onChange={event => onSelectExport(event.target.value)}
           >
             <option value="">Select an export</option>
-            {execution.info?.functions.map(fn => (
+            {functions.map(fn => (
               <option key={fn.name} value={fn.name}>
                 {fn.name} · {fn.signature}
-                {fn.signatureCode === null ? ' (unsupported)' : ''}
               </option>
             ))}
           </select>
@@ -211,8 +213,7 @@ export function Run({
         <button
           onClick={onRun}
           disabled={
-            !canRun(state) ||
-            (currentModule(state) && fn?.signatureCode === null)
+            !canRun(state) || (currentModule(state) && fn?.callable === false)
           }
         >
           Run function
@@ -229,11 +230,16 @@ export function Run({
       {!execution.module && (
         <p className="wasmbolt-hint">
           {canRun(state)
-            ? 'Run compiles your source and calls an exported function.'
+            ? 'Compile and Run builds a module and calls an exported function.'
             : 'Choose WebAssembly to run your code, or use a Wasm file.'}
         </p>
       )}
-      {fn?.signatureCode === null && (
+      {execution.info && functions.length === 0 && (
+        <p className="wasmbolt-hint">
+          This module has no callable scalar exports.
+        </p>
+      )}
+      {fn?.callable === false && (
         <p>This function signature is not supported.</p>
       )}
       {busy && (

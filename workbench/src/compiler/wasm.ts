@@ -4,8 +4,8 @@ export type WasmFunction = Readonly<{
   params: readonly string[];
   results: readonly string[];
   signature: string;
-  /** Numeric runner ABI code; null means this export cannot be called. */
-  signatureCode: number | null;
+  /** True when the browser runner can represent this scalar signature. */
+  callable: boolean;
 }>;
 
 export type WasmInfo = Readonly<{
@@ -16,15 +16,7 @@ export type WasmInfo = Readonly<{
 }>;
 
 const kinds = ['function', 'table', 'memory', 'global', 'tag'];
-const signatures = [
-  'i32()',
-  'i32(i32)',
-  'i32(i32, i32)',
-  'f64()',
-  'f64(f64)',
-  'f64(f64, f64)',
-  'void()'
-];
+const scalarTypes = new Set(['i32', 'f32', 'f64']);
 
 /** Inspect bounded sections without instantiating or executing the module. */
 export function inspectWasm(bytes: Uint8Array): WasmInfo {
@@ -116,15 +108,16 @@ export function inspectWasm(bytes: Uint8Array): WasmInfo {
         const signature =
           `${type.results.join(', ') || 'void'}` +
           `(${type.params.join(', ')})`;
-        const signatureCode = signatures.indexOf(signature);
         return {
           name: entry.name,
           ...type,
           signature,
-          signatureCode:
-            signatureCode < 0 || entry.name.startsWith('__')
-              ? null
-              : signatureCode
+          callable:
+            !entry.name.startsWith('__') &&
+            type.results.length <= 1 &&
+            [...type.params, ...type.results].every(type =>
+              scalarTypes.has(type)
+            )
         };
       })
   };

@@ -34,7 +34,7 @@ export default defineConfig({
   webServer: [
     {
       command:
-        (process.env.FORTITUDO_LOCAL_COMMAND ?? 'python -m fortitudo') +
+        (process.env.WASMBOLT_LOCAL_COMMAND ?? 'python -m wasmbolt') +
         ' --no-browser --port 8767',
       url: 'http://127.0.0.1:8767/',
       reuseExistingServer: !process.env.CI
@@ -50,7 +50,7 @@ export default defineConfig({
         JUPYTER_CONFIG_DIR: resolve(import.meta.dirname, 'work/jupyter-config'),
         JUPYTER_RUNTIME_DIR: resolve(import.meta.dirname, '.cache/jupyter')
       },
-      url: 'http://127.0.0.1:8766/fortitudo/lab',
+      url: 'http://127.0.0.1:8766/wasmbolt/lab',
       timeout: 120_000,
       reuseExistingServer: !process.env.CI
     }

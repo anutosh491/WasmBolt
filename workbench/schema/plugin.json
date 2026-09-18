@@ -1,5 +1,5 @@
 {
-  "title": "Fortitudo",
+  "title": "WasmBolt",
   "description": "Defaults for new compiler explorer sessions.",
   "type": "object",
   "additionalProperties": false,
@@ -44,7 +44,7 @@
     "mlirPipeline": {
       "title": "MLIR pipeline",
       "type": "string",
-      "default": "builtin.module(canonicalize,cse)"
+      "default": "builtin.module(canonicalize,cse,convert-arith-to-llvm,convert-func-to-llvm,reconcile-unrealized-casts)"
     }
   }
 }

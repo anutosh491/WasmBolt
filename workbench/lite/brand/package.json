@@ -1,8 +1,8 @@
 {
-    "name": "@fortitudo/lite-brand",
+    "name": "@wasmbolt/lite-brand",
     "version": "1.0.0",
     "private": true,
-    "description": "Branding for the bundled Fortitudo JupyterLite site",
+    "description": "Branding for the bundled WasmBolt JupyterLite site",
     "license": "BSD-3-Clause",
     "main": "../../lib/jupyter/brand.js",
     "dependencies": {

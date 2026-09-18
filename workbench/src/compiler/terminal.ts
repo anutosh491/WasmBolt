@@ -1,11 +1,23 @@
-import { serialize } from './request';
-
 export type Command = Readonly<{
   tool: string;
-  command: string;
+  args: readonly string[];
   stdout: string | null;
   stderr: string | null;
 }>;
+
+const utilityNames: Readonly<Record<string, string>> = {
+  'llvm-ar': 'ar',
+  'llvm-cxxfilt': 'cxxfilt',
+  'llvm-nm': 'nm',
+  'llvm-objcopy': 'objcopy',
+  'llvm-objdump': 'objdump',
+  'llvm-readobj': 'readobj',
+  'llvm-size': 'size'
+};
+
+export function utilitySubcommand(tool: string): string | null {
+  return utilityNames[tool] ?? null;
+}
 
 /** A single GNU-quoted tool invocation with filesystem redirections. */
 export function command(text: string): Command {
@@ -85,13 +97,21 @@ export function command(text: string): Command {
   }
   const tool = args[0];
   if (
-    !['clang', 'clang++', 'opt', 'llc', 'wasm-ld', 'mlir-opt', 'dot'].includes(
-      tool
-    )
+    ![
+      'clang',
+      'clang++',
+      'opt',
+      'llc',
+      'wasm-ld',
+      'mlir-opt',
+      'mlir-translate',
+      'dot'
+    ].includes(tool) &&
+    utilitySubcommand(tool) === null
   ) {
     throw new Error(
-      'Choose clang, clang++, opt, llc, wasm-ld, mlir-opt or dot.'
+      'Choose a compiler, linker, MLIR driver, Graphviz or LLVM utility.'
     );
   }
-  return { tool, command: serialize(args), stdout, stderr };
+  return { tool, args, stdout, stderr };
 }

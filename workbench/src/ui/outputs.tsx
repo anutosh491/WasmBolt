@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as React from 'react';
 
 import { assemblyText } from '../compiler/assembly';
 import type { File, OutputKind } from '../compiler/types';
 import { outputLabels } from '../compiler/types';
+import type { IWatRenderer } from '../compiler/wat';
 import { inspectWasm } from '../compiler/wasm';
 import { stale } from '../model';
 import type { State } from '../model';
@@ -18,10 +19,14 @@ interface IFileActions {
 export function Output({
   state,
   kind,
+  renderer,
+  active,
   ...actions
 }: IFileActions & {
   state: State;
   kind: OutputKind;
+  renderer: IWatRenderer;
+  active: boolean;
 }): React.ReactElement {
   const [selected, select] = useState('');
   const result = state.result?.value;
@@ -77,19 +82,16 @@ export function Output({
           workspace={false}
           label={`${outputLabels[kind]} output`}
           x86={x86}
+          wat={kind === 'wasm' ? { renderer, active } : undefined}
           {...actions}
         />
       ) : !result && !state.active && state.status !== 'failed' ? (
-        <div
+        <pre
           className="wasmbolt-empty"
           aria-label={`${outputLabels[kind]} output`}
         >
-          <h2>Compile to see output</h2>
-          <p className="wasmbolt-hint">
-            The first compile downloads a large compiler. Once loaded, you can
-            compile offline in this tab. Your code stays in your browser.
-          </p>
-        </div>
+          Compile to see output.
+        </pre>
       ) : (
         <pre
           className="wasmbolt-output"
@@ -150,12 +152,14 @@ function FileOutput({
   workspace,
   label,
   x86,
+  wat,
   ...actions
 }: IFileActions & {
   file: File;
   workspace: boolean;
   label: string;
   x86?: boolean;
+  wat?: Readonly<{ renderer: IWatRenderer; active: boolean }>;
 }): React.ReactElement {
   const [hideMetadata, setHideMetadata] = useState(true);
   const assembly = file.path.endsWith('.s');
@@ -228,7 +232,11 @@ function FileOutput({
         <div className="wasmbolt-file-actions">{buttons}</div>
       )}
       {wasm ? (
-        <WasmOutput file={file} />
+        wat ? (
+          <WasmOutput file={file} {...wat} />
+        ) : (
+          <WasmMetadata file={file} />
+        )
       ) : image ? (
         <ImageOutput data={file.data} type={image} />
       ) : binary ? (
@@ -247,7 +255,76 @@ function FileOutput({
   );
 }
 
-function WasmOutput({ file }: { file: File }): React.ReactElement {
+type WatContent = Readonly<{
+  data: Uint8Array;
+  status: 'loading' | 'ready' | 'failed';
+  text: string;
+}>;
+
+function WasmOutput({
+  file,
+  renderer,
+  active
+}: {
+  file: File;
+  renderer: IWatRenderer;
+  active: boolean;
+}): React.ReactElement {
+  const [output, setOutput] = useState<WatContent | null>(null);
+  const cached = useRef<WatContent | null>(null);
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    if (cached.current?.data === file.data) {
+      setOutput(cached.current);
+      return;
+    }
+    const controller = new AbortController();
+    let current = true;
+    setOutput({
+      data: file.data,
+      status: 'loading',
+      text: 'Rendering WebAssembly text…'
+    });
+    void renderer
+      .render(file.data, controller.signal)
+      .then(text => {
+        if (current) {
+          const content: WatContent = {
+            data: file.data,
+            status: 'ready',
+            text
+          };
+          cached.current = content;
+          setOutput(content);
+        }
+      })
+      .catch(error => {
+        const cancelled = error instanceof Error && error.name === 'AbortError';
+        if (current && !cancelled) {
+          const content: WatContent = {
+            data: file.data,
+            status: 'failed',
+            text: `WAT rendering failed: ${String(error)}`
+          };
+          cached.current = content;
+          setOutput(content);
+        }
+      });
+    return () => {
+      current = false;
+      controller.abort();
+    };
+  }, [active, file.data, renderer]);
+  const content =
+    active && output?.data === file.data
+      ? output.text
+      : 'Select this output to render WebAssembly text.';
+  return <TextOutput text={content} label="Wasm module output" />;
+}
+
+function WasmMetadata({ file }: { file: File }): React.ReactElement {
   const content = useMemo(() => {
     try {
       const info = inspectWasm(file.data);

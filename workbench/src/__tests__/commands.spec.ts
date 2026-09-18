@@ -68,6 +68,9 @@ it('routes edits and releases command registrations', async () => {
   );
   expect(stale(store.state)).toBe(true);
   expect(activatePane).not.toHaveBeenCalled();
+  await commands.execute(CommandIDs.showDiagnostics);
+  await commands.execute(CommandIDs.showPipelines);
+  expect(activatePane.mock.calls).toEqual([['diagnostics'], ['pipelines']]);
   expect(commands.isEnabled(CommandIDs.compile)).toBe(true);
   registered.dispose();
   expect(commands.hasCommand(CommandIDs.compile)).toBe(false);
@@ -112,6 +115,53 @@ it('keeps cancellation distinct from worker failure', async () => {
   registered.dispose();
 });
 
+it('handles clear without invoking the compiler', async () => {
+  const commands = new CommandRegistry();
+  const store = createStore(initial());
+  const command = jest.fn();
+  const registered = registerCommands(commands, {
+    store,
+    compiler: {
+      initialize: jest.fn(),
+      compile: jest.fn(),
+      command,
+      cancel: jest.fn(),
+      dispose: jest.fn()
+    },
+    resetLayout: jest.fn(),
+    compare: jest.fn(),
+    activatePane: jest.fn(),
+    copy: jest.fn(),
+    download: jest.fn(),
+    runner: { run: jest.fn(), reset: jest.fn(), dispose: jest.fn() }
+  });
+  store.dispatch({ type: 'begin', id: 1 });
+  store.dispatch({
+    type: 'command',
+    id: 1,
+    result: {
+      id: 1,
+      files: [],
+      stage: {
+        name: 'clang',
+        status: 'success',
+        commands: ['clang --version'],
+        diagnostics: [],
+        stdout: 'LLVM 23.1.0',
+        stderr: '',
+        exitCode: 0,
+        duration: 1
+      }
+    }
+  });
+  expect(store.state.terminal).toHaveLength(1);
+  await commands.execute(CommandIDs.runCommand, { command: ' clear ' });
+  expect(store.state.terminal).toEqual([]);
+  expect(command).not.toHaveBeenCalled();
+  registered.dispose();
+  store.dispose();
+});
+
 it('keeps output selections when closing a restored comparison', async () => {
   const commands = new CommandRegistry();
   const store = createStore(initial());
@@ -136,7 +186,7 @@ it('keeps output selections when closing a restored comparison', async () => {
   await commands.execute(CommandIDs.compare);
   expect(store.state.outputs).toEqual({
     primary: 'ir',
-    comparison: 'optimized'
+    comparison: 'graphs'
   });
   store.dispatch({
     type: 'layout',
@@ -156,7 +206,7 @@ it('keeps output selections when closing a restored comparison', async () => {
   });
   await commands.execute(CommandIDs.selectOutput, {
     group: 'comparison',
-    output: 'analysis'
+    output: 'ast'
   });
   expect(commands.isToggled(CommandIDs.compare)).toBe(true);
   const outputs = store.state.outputs;

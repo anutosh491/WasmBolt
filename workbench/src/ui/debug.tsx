@@ -22,69 +22,68 @@ export function Debugger(props: IDebuggerProps): React.ReactElement {
   const [command, setCommand] = useState('');
   const active = ['starting', 'running', 'stopped'].includes(debug.status);
   const stopped = debug.status === 'stopped';
+  const canBuild =
+    ['c', 'cpp'].includes(props.state.options.language) &&
+    props.state.options.target === 'wasm32-unknown-emscripten';
   const module =
     debug.module ??
     props.state.execution.module ??
     props.state.files.find(file => file.path.endsWith('.wasm'))?.path ??
-    null;
+    (canBuild ? '/workspace/debug.wasm' : null);
   return (
     <section className="wasmbolt-debugger" aria-label="Debugger pane">
       <div className="wasmbolt-debug-toolbar" aria-label="Debug controls">
-        {!active && (
-          <button
-            className="wasmbolt-primary"
-            disabled={!module}
-            onClick={props.onStartDebugging}
-          >
-            Start debugging
-          </button>
+        <button
+          className="wasmbolt-primary"
+          disabled={!module || active || props.state.active !== null}
+          onClick={props.onStartDebugging}
+        >
+          Start
+        </button>
+        {debug.status === 'running' ? (
+          <DebugButton
+            label="Pause"
+            icon="Ⅱ"
+            onClick={props.onPauseDebugging}
+          />
+        ) : (
+          <DebugButton
+            label="Continue"
+            icon="▶"
+            disabled={!stopped}
+            onClick={props.onContinueDebugging}
+          />
         )}
-        {active && (
-          <>
-            {debug.status === 'running' ? (
-              <DebugButton
-                label="Pause"
-                icon="Ⅱ"
-                onClick={props.onPauseDebugging}
-              />
-            ) : (
-              <DebugButton
-                label="Continue"
-                icon="▶"
-                disabled={!stopped}
-                onClick={props.onContinueDebugging}
-              />
-            )}
-            <DebugButton
-              label="Step over"
-              icon="↷"
-              disabled={!stopped}
-              onClick={props.onStepOver}
-            />
-            <DebugButton
-              label="Step into"
-              icon="↓"
-              disabled={!stopped}
-              onClick={props.onStepIn}
-            />
-            <DebugButton
-              label="Step out"
-              icon="↑"
-              disabled={!stopped}
-              onClick={props.onStepOut}
-            />
-            <DebugButton
-              label="Restart"
-              icon="↻"
-              onClick={props.onRestartDebugging}
-            />
-            <DebugButton
-              label="Stop"
-              icon="■"
-              onClick={props.onStopDebugging}
-            />
-          </>
-        )}
+        <DebugButton
+          label="Step over"
+          icon="↷"
+          disabled={!stopped}
+          onClick={props.onStepOver}
+        />
+        <DebugButton
+          label="Step into"
+          icon="↓"
+          disabled={!stopped}
+          onClick={props.onStepIn}
+        />
+        <DebugButton
+          label="Step out"
+          icon="↑"
+          disabled={!stopped}
+          onClick={props.onStepOut}
+        />
+        <DebugButton
+          label="Restart"
+          icon="↻"
+          disabled={!active}
+          onClick={props.onRestartDebugging}
+        />
+        <DebugButton
+          label="Stop"
+          icon="■"
+          disabled={!active}
+          onClick={props.onStopDebugging}
+        />
         <span className="wasmbolt-debug-target">
           {module ? filename(module) : 'Select a .wasm file in Explorer'}
         </span>
@@ -151,9 +150,10 @@ export function Debugger(props: IDebuggerProps): React.ReactElement {
           {debug.console
             .map(
               entry =>
-                `${entry.channel === 'input' ? '(lldb) ' : ''}${entry.text}`
+                `${entry.channel === 'input' ? '(lldb) ' : ''}` +
+                entry.text.replace(/\n$/, '')
             )
-            .join('')}
+            .join('\n')}
         </pre>
         <form
           onSubmit={event => {

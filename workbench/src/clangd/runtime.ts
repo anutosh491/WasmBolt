@@ -1,15 +1,12 @@
 import { asset } from '../compiler/assets';
+import type { IFilesystem } from '../compiler/module';
+import { installPackages } from '../compiler/packages';
 import { isRecord } from '../compiler/protocol';
 import { isClangdInput } from './protocol';
 import type { ClangdInput, ClangdOutput, JsonRpcMessage } from './protocol';
 
-type EmscriptenFileSystem = Readonly<{
-  mkdirTree(path: string): void;
-  writeFile(path: string, contents: string): void;
-}>;
-
 type ClangdModule = Readonly<{
-  FS: EmscriptenFileSystem;
+  FS: IFilesystem;
   callMain(args: readonly string[]): unknown;
 }>;
 
@@ -170,8 +167,9 @@ export function installClangdWorker(scope: IClangdWorkerScope): void {
       !isRecord(manifest) ||
       manifest.format !== 1 ||
       manifest.clangdOrigin !== 'source' ||
-      typeof manifest.version !== 'string' ||
-      typeof manifest.revision !== 'string'
+      typeof manifest.clangdVersion !== 'string' ||
+      typeof manifest.clangdRevision !== 'string' ||
+      manifest.clangdThreaded !== true
     ) {
       throw new Error('The clangd manifest is invalid or not source-built.');
     }
@@ -210,21 +208,48 @@ export function installClangdWorker(scope: IClangdWorkerScope): void {
       onAbort: (reason: unknown) =>
         post({ kind: 'error', message: `clangd aborted: ${message(reason)}` })
     });
+    await installPackages(root.href, manifest.files, module.FS, progress => {
+      if (progress.phase === 'downloading') {
+        const download = progress.downloads[0];
+        if (download) {
+          post({
+            kind: 'progress',
+            loaded: download.loaded,
+            total: download.total
+          });
+        }
+      }
+    });
     module.FS.mkdirTree('/workspace');
+    const clangMajor = manifest.clangdVersion.split('.')[0];
     module.FS.writeFile(
       '/workspace/.clangd',
       [
+        'Index:',
+        '  StandardLibrary: false',
         'CompileFlags:',
         '  Add:',
         '    - --target=wasm32-unknown-emscripten',
-        '    - -std=c++23',
         '    - -nostdinc',
-        `    - -resource-dir=/lib/clang/${manifest.version.split('.')[0]}`,
+        `    - -resource-dir=/lib/clang/${clangMajor}`,
         '    - -isystem/include/wasm32-emscripten/c++/v1',
         '    - -isystem/include/c++/v1',
-        `    - -isystem/lib/clang/${manifest.version.split('.')[0]}/include`,
+        `    - -isystem/lib/clang/${clangMajor}/include`,
         '    - -isystem/include/wasm32-emscripten',
-        '    - -isystem/include'
+        '    - -isystem/include',
+        '    - -isystem/include/compat',
+        '---',
+        'If:',
+        '  PathMatch: .*[.]c',
+        'CompileFlags:',
+        '  Add:',
+        '    - -std=c23',
+        '---',
+        'If:',
+        '  PathMatch: .*[.](cc|cpp|cxx|c[+][+]|h|hh|hpp|hxx)',
+        'CompileFlags:',
+        '  Add:',
+        '    - -std=c++23'
       ].join('\n')
     );
     const execution = module.callMain([

@@ -7,9 +7,15 @@ from pathlib import Path
 
 
 class RequestHandler(SimpleHTTPRequestHandler):
+  def end_headers(self):
+    self.send_header('Cross-Origin-Opener-Policy', 'same-origin')
+    self.send_header('Cross-Origin-Embedder-Policy', 'require-corp')
+    self.send_header('Cross-Origin-Resource-Policy', 'same-origin')
+    super().end_headers()
+
   def log_request(self, code='-', size='-'):
     if (
-      os.environ.get('FORTITUDO_TEST_SERVER_LOGS') == '1'
+      os.environ.get('WASMBOLT_TEST_SERVER_LOGS') == '1'
       or (isinstance(code, int) and code >= 400)
     ):
       super().log_request(code, size)

@@ -26,7 +26,7 @@ environment automatically and includes our built extension directly.
 
 The private `lite/brand` workspace bundles `src/jupyter/brand.ts` from the
 shared TypeScript build. The Lite builder includes it only in the demo site,
-where it replaces the JupyterLite logo with a Fortitudo link to `/`.
+where it replaces the JupyterLite logo with a WasmBolt link to `/`.
 
 Pixi uses Node 24. GitHub Actions have their own JavaScript runtime, independent
 of Pixi's Node version. Keep workflow actions on releases that use Node 24 too;
@@ -95,9 +95,9 @@ HTML hook; its version placeholder comes from `package.json`. All asset URLs
 remain relative, including compiler and notebook kernel assets. The site build
 checks required entry points and the 1 GB Pages size limit.
 
-The same build stages `fortitudo/site` for the Python launcher. Its URL manifest
+The same build stages `wasmbolt/site` for the Python launcher. Its URL manifest
 maps identical assets to one stored file, sharing the compiler with the
-JupyterLab extension. `fortitudo --no-browser` serves this packaged site on
+JupyterLab extension. `wasmbolt --no-browser` serves this packaged site on
 localhost; it never serves the current working directory. Both generated site
 directories are ignored by Git. Lite omits source maps to keep the installation
 within PyPI's archive size limit.
@@ -108,8 +108,8 @@ pushes deploy it after both the build and wheel installation checks pass. Pull
 requests and package releases do not deploy Pages. The site therefore tracks
 `main`, independently of npm and PyPI releases.
 
-The deployed URLs are `https://afshin.github.io/fortitudo/` and
-`https://afshin.github.io/fortitudo/lite/lab/index.html`. Generated site and
+The deployed URLs are `https://anutosh491.github.io/WasmBolt/` and
+`https://anutosh491.github.io/WasmBolt/lite/lab/index.html`. Generated site and
 kernel assets are uploaded as an Actions artifact; they do not belong in Git.
 
 ## Development loop
@@ -146,7 +146,7 @@ pixi run --as-is jlpm serve
 
 Edit the feature guide between `guide:start` and `guide:end` in `README.md`.
 `build:guide` generates the shared UI content in `src/generated/guide.ts` and
-`lite/files/Fortitudo guide.md`. Both are ignored build outputs. Frontend and
+`lite/files/WasmBolt guide.md`. Both are ignored build outputs. Frontend and
 Lite builds regenerate them; the main watch command also watches the README.
 During standalone development, run `jlpm watch:guide` in a Pixi shell to update
 the guide as you edit it.
@@ -194,7 +194,7 @@ in the standalone production build.
 After building all hosts:
 
 ```sh
-pixi run --as-is jlpm pack --out dist/fortitudo.tgz
+pixi run --as-is jlpm pack --out dist/wasmbolt.tgz
 pixi run --as-is python -m build --no-isolation
 pixi run --as-is jlpm test:packages
 pixi run --as-is python scripts/release.py
@@ -211,9 +211,10 @@ Test the actual wheel in a clean environment without JupyterLab:
 
 ```sh
 pixi run --as-is python -m venv work/wheel-env
-work/wheel-env/bin/python -m pip install --no-index --no-deps dist/fortitudo-*.whl
+work/wheel-env/bin/python -m pip install --no-index --no-deps \
+  dist/wasmbolt-*.whl
 work/wheel-env/bin/python -I -m unittest discover -s tests -v
-FORTITUDO_LOCAL_COMMAND=work/wheel-env/bin/fortitudo \
+WASMBOLT_LOCAL_COMMAND=work/wheel-env/bin/wasmbolt \
   pixi run --as-is jlpm test:browser ui-tests/tests/site.spec.ts
 ```
 
@@ -228,7 +229,7 @@ already published. See [RELEASE.md](RELEASE.md) for publishing from GitHub
 releases and recovering failed uploads. Keep `package.json` as the version
 source; staging, commits, and tags remain the user's responsibility.
 
-If installing a release in Pixi fails on `labextensions/fortitudo/package.json`,
-run `unlink .pixi/envs/default/share/jupyter/labextensions/fortitudo` from the
+If installing a release in Pixi fails on `labextensions/wasmbolt/package.json`,
+run `unlink .pixi/envs/default/share/jupyter/labextensions/wasmbolt` from the
 repository root to remove the broken development link, then retry with
-`pixi run --as-is python -m pip install --force-reinstall fortitudo`.
+`pixi run --as-is python -m pip install --force-reinstall wasmbolt`.

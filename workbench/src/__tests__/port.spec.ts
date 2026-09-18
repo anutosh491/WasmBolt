@@ -19,7 +19,7 @@ it('reads exported scalar signatures without executing the module', () => {
       params: ['i32'],
       results: ['i32'],
       signature: 'i32(i32)',
-      signatureCode: 1
+      callable: true
     }
   ]);
   for (let i = 1; i < wasm.length; i++) {
@@ -33,6 +33,20 @@ it('reads exported scalar signatures without executing the module', () => {
       Uint8Array.from([...wasm.slice(0, 8), 1, 255, 255, 255, 255, 31])
     )
   ).toThrow();
+
+  const mixed = Uint8Array.from([
+    0, 97, 115, 109, 1, 0, 0, 0, 1, 8, 1, 96, 3, 127, 125, 124, 1, 124, 3, 2, 1,
+    0, 7, 7, 1, 3, 109, 105, 120, 0, 0
+  ]);
+  expect(inspectWasm(mixed).functions).toEqual([
+    {
+      name: 'mix',
+      params: ['i32', 'f32', 'f64'],
+      results: ['f64'],
+      signature: 'f64(i32, f32, f64)',
+      callable: true
+    }
+  ]);
 });
 
 it('parses quoted commands and redirections without a shell', () => {
@@ -40,7 +54,7 @@ it('parses quoted commands and redirections without a shell', () => {
     command('opt "-passes=print<domtree>" "source file.ll" 2> "tree.txt"')
   ).toEqual({
     tool: 'opt',
-    command: '"opt" "-passes=print<domtree>" "source file.ll"',
+    args: ['opt', '-passes=print<domtree>', 'source file.ll'],
     stdout: null,
     stderr: 'tree.txt'
   });
@@ -92,7 +106,11 @@ it('plans applicable outputs with a single optimization stage', () => {
       step => step.name === 'wasm'
     )
   ).toBe(false);
-  expect(plan('mlir').steps.map(step => step.name)).toEqual(['mlir', 'graphs']);
+  expect(plan('mlir').steps.map(step => step.name)).toEqual([
+    'mlir',
+    'ir',
+    'graphs'
+  ]);
 });
 
 it('migrates v1 layouts without losing edits or split proportions', () => {
@@ -149,8 +167,8 @@ it('shares Unicode inputs without results or layout', () => {
   expect(restored.layout).toBeNull();
   expect(restored).not.toHaveProperty('files');
   expect(() => decodeShare('not.a.link')).toThrow();
-  const url = new URL('https://example.test/fortitudo/');
-  url.searchParams.set('fortitudo', encodeShare(state));
+  const url = new URL('https://example.test/wasmbolt/');
+  url.searchParams.set('wasmbolt', encodeShare(state));
   const sharing = createSharing(url);
   expect(sharing.read()?.source).toBe(state.source);
   expect(sharing.read()).toBeNull();
@@ -220,7 +238,7 @@ it('guards binary snapshots and calls, allowing NaN returns', () => {
     id: 1,
     module: '/workspace/program.wasm',
     symbol: 'square',
-    signatureCode: 1,
+    signature: { params: ['i32'], results: ['i32'] },
     files: [{ path: '/workspace/program.wasm', data: wasm }],
     args: [5]
   };

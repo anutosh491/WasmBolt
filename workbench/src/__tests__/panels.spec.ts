@@ -1,5 +1,5 @@
 import { MessageLoop } from '@lumino/messaging';
-import { SplitPanel, TabPanel, Widget } from '@lumino/widgets';
+import { SplitPanel, Widget } from '@lumino/widgets';
 
 import { initial, snapshot } from '../model';
 import type { Area } from '../model';
@@ -74,11 +74,16 @@ it('resets containers while retaining views and saving once', () => {
   expect(panes.source.node.hasAttribute('role')).toBe(false);
   expect(panes.source.node.hasAttribute('aria-labelledby')).toBe(false);
   expect(panes.outputs.isHidden).toBe(false);
+  const defaults = new Set([
+    panes.explorer,
+    panes.source,
+    panes.outputs,
+    panes.terminal,
+    panes.debugger
+  ]);
   for (const pane of Object.values(panes)) {
     expect(pane.isDisposed).toBe(false);
-    if (pane !== panes.comparison) {
-      expect(panel.contains(pane)).toBe(true);
-    }
+    expect(panel.contains(pane)).toBe(defaults.has(pane));
   }
   panel.dispose();
   expect(changes).toHaveLength(1);
@@ -141,25 +146,47 @@ it('restores and resets a sole output group, retaining its views', () => {
   expect(Object.values(panes).every(pane => pane.isDisposed)).toBe(true);
 });
 
-it('folds tools without losing split proportions or the source view', () => {
+it('reveals advanced panes without showing them by default', () => {
   const panes = views();
   const panel = new PanePanel(panes, null, () => {});
-  const closed = panel.save();
-  expect(panes.diagnostics.isHidden).toBe(true);
+  const initial = JSON.stringify(panel.save());
+  expect(initial).not.toContain('diagnostics');
+  expect(initial).not.toContain('pipelines');
+  expect(initial).not.toContain('run');
   panel.activatePane('diagnostics');
   expect(panes.diagnostics.isHidden).toBe(false);
-  expect(panel.save()).toMatchObject({ sizes: [0.72, 0.28] });
-  const tools = panes.diagnostics.parent?.parent;
-  if (!(tools instanceof TabPanel)) {
-    throw new Error('Expected the tools tab panel.');
-  }
-  tools.currentIndex = -1;
-  const folded = panel.save();
-  expect(folded).not.toEqual(closed);
-  panel.compare();
-  panel.compare();
-  expect(panel.save()).toEqual(folded);
+  expect(panel.save()).toMatchObject({ sizes: [0.76, 0.24] });
+  panel.activatePane('pipelines');
+  expect(panes.pipelines.isHidden).toBe(false);
+  panel.activatePane('run');
+  expect(panes.run.isHidden).toBe(false);
   expect(panes.source.isDisposed).toBe(false);
+  panel.dispose();
+});
+
+it('hides a restored Execute pane until a module reveals it', () => {
+  const panes = views();
+  const panel = new PanePanel(
+    panes,
+    {
+      type: 'tab-area',
+      widgets: ['outputs', 'run', 'debugger'],
+      currentIndex: 1
+    },
+    () => {},
+    ['run']
+  );
+  expect(panel.save()).toEqual({
+    type: 'tab-area',
+    widgets: ['outputs', 'debugger'],
+    currentIndex: 0
+  });
+  panel.activatePane('run');
+  expect(panel.save()).toEqual({
+    type: 'tab-area',
+    widgets: ['outputs', 'run', 'debugger'],
+    currentIndex: 1
+  });
   panel.dispose();
 });
 
@@ -186,5 +213,15 @@ it('restores collapsed tools but rejects a collapsed source area', () => {
       }
     })
   ).toBeNull();
+  panel.dispose();
+});
+
+it('omits an unavailable optional debugger pane', () => {
+  const panes = views();
+  delete (panes as Partial<typeof panes>).debugger;
+  const panel = new PanePanel(panes, null, () => {});
+  expect(JSON.stringify(panel.save())).not.toContain('debugger');
+  panel.reset();
+  expect(JSON.stringify(panel.save())).not.toContain('debugger');
   panel.dispose();
 });

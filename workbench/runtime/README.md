@@ -1,77 +1,107 @@
 # Compiler runtime
 
-Fortitudo vendors WasmBolt's compiler module and build recipe from revision
-`6566da129fde331db3f4f24856c7ea56c2c4d71c` of
-[WasmBolt](https://github.com/anutosh491/WasmBolt), by Anutosh Bhat. The MIT
-notice is in `licenses/WasmBolt.txt`.
+This directory builds and stages the WebAssembly tool runtimes used by WasmBolt.
+The reproducible baseline is LLVM 23.1.0 with Emscripten 4.0.9. Exact
+native-build, Emscripten-host, and browser-package environments are recorded
+under `locks/`.
 
-The baseline is Emscripten 4.0.9 and LLVM 23.1.0. `build.yml` and `host.yml`
-retain upstream environment declarations. Exact package URLs and package hashes
-are locked separately for macOS arm64, Linux x64, and the common Emscripten
-target. `sources.json` pins the matching llc source files with SHA-256 hashes.
-Build with `pixi run --as-is jlpm build:compiler`.
+Build with:
 
-The wrapper preserves upstream exported functions, target initialization, Clang
-invocation, LLVM option resets, opt pipeline, llc adaptation, dynamic loading
-support, memory settings, and optional MLIR driver. The CMake file checks that
-the expected llc main and InitLLVM statements exist before adapting them.
-Removing InitLLVM prevents LLVM shutdown between invocations. Fortitudo changes
-source paths and removes the upstream demo-page copying.
+```sh
+pixi run --as-is jlpm build:compiler
+```
 
-The final compiler and MLIR links use Emscripten's `-Oz` size optimization. The
-build clears the toolchain's implicit `EMCC_CFLAGS` override and declares its
-ABI flags in CMake so the environment cannot silently restore `-O2`.
-`MAIN_MODULE=1` retains exports needed by dynamically loaded user programs;
-changing it to mode 2 would require constraining those programs' imports.
+## Process boundaries
 
-The build assembles a browser filesystem from the Emscripten sysroot and pinned
-host prefix. It preserves public headers and libraries, excluding development
-headers and archives for the toolchain already linked into the compiler. Library
-symlink aliases are recreated during initialization, so each library's contents
-are preloaded only once. Clang resource headers appear at `/lib/clang/23`. The
-optional MLIR driver is loaded only when requested.
+The persistent compiler worker owns one `Compiler.wasm` instance. It currently
+contains the Clang frontend adapter, the WebAssembly LLD library, and Graphviz.
+JavaScript passes a packed `argv` vector to C++; C++ does not stringify or
+reparse commands. LLD's `canRunAgain` result is checked after every link. A
+false result poisons the instance and causes the owning worker to be replaced.
 
-Generated assets live in the ignored `compiler/` directory. Its manifest records
-compiler version, resource directory, provenance, file sizes, and SHA-256
-hashes, including license files. `check:compiler` requires a complete source
-build. The `stage` subcommand can inspect imported upstream assets, but marks
-them as imported; they cannot pass production checks.
+`opt`, `llc`, `mlir-opt`, and `mlir-translate` run as genuine upstream command
+line programs in fresh, disposable workers. Each invocation receives a snapshot
+of `/workspace`, executes its complete `argv`, returns a replacement snapshot,
+and releases the entire Wasm instance. WasmBolt does not duplicate their option
+parsing or reset LLVM's process-global command-line registry.
 
-The Emscripten ES module stays separate from frontend bundles. A dedicated
-module worker imports it with an explicit URL and resolves data and Wasm through
-`locateFile`. All compiles execute LLVM operations serially in one worker. An
-explicit dependency plan shares frontend IR across optimization, analysis,
-graphs, assembly, and object generation. AST uses a separate Clang invocation.
-Frontend LLVM passes are disabled; one opt pipeline produces optimized IR. Wasm
-uses PIC consistently in Clang, opt's target machine, and llc before linking a
-dynamic module. Supplied IR target triples and layouts are checked against the
-selected target machine. Failed stages skip only their dependents.
+The opt and llc assets are intentionally source-gated. The current 23.1.0
+Emscripten package does not ship `opt.js`/`opt.wasm` or `llc.js`/`llc.wasm`.
+They become available only when all four genuine executable assets are present
+in the build input. MLIR follows the same rule for its two executable pairs. A
+partial runtime is rejected rather than silently replaced by a custom
+implementation. Each executable loader must be modularized, skip its initial
+run, and export Emscripten's `FS` and `callMain` runtime methods.
 
-Raw stdout and stderr are captured as bytes because LLVM can flush partway
-through a diagnostic line. The wrapper flushes LLVM and C streams at operation
-boundaries, including the MLIR driver's locally bound LLVM streams. Command
-records are kept outside captured output. This prevents AST, analysis, or
-redirected MLIR output from inheriting buffered output from an earlier tool. The
-optional MLIR driver is loaded and verified on demand, with retry after a
-download failure. The command workspace is replaced at Compile and snapshotted
-after each build or manual command. Cancellation terminates the worker rather
-than interrupting LLVM in place.
+The [MLIR recipe](../native/mlir/README.md) links both genuine MLIR programs
+from an exact, hash-locked `mlir-python-bindings` package. Its smoke test runs
+Func/Arith MLIR through `mlir-opt`, then passes the optimized module to
+`mlir-translate --mlir-to-llvmir` and verifies the resulting LLVM IR.
 
-Run creates a separate worker using the same packaged Emscripten runtime.
-Compilation never loads the generated program. Each runner holds one module and
-its workspace dependencies. The numeric bridge retains upstream's seven scalar
-signatures; `wasmbolt_call_error` reports errors explicitly so NaN can be a
-successful result. Stop, traps, timeout, and replacement modules terminate the
-runner. Recreating the worker is required because
-[Emscripten 4.0.9's dynamic loader](https://github.com/emscripten-core/emscripten/blob/4.0.9/src/lib/libdylink.js)
-does not reclaim all static module allocations on unload.
+LLVM binary utilities use the upstream multicall `llvm.js`/`llvm.wasm` from the
+`llvm-driver` package. Every `llvm-nm`, `llvm-readobj`, `llvm-size`,
+`llvm-cxxfilt`, `llvm-ar`, `llvm-objdump`, or `llvm-objcopy` command gets a
+fresh utility worker and the same workspace-transfer boundary.
 
-License notices for LLVM, Emscripten, and packages whose headers or libraries
-are included are in `licenses/`. They are copied to every distribution. The
-exact resolved package metadata remains in the environment locks.
+The intended persistent compiler endpoint is a thin `ToolSession` containing the
+real Clang and LLD driver entry points. That requires those entry objects to be
+exported by the Emscripten LLVM/Clang/LLD build. The pinned package does not
+provide them yet, so the current core still exposes Clang frontend and `wasm-ld`
+as explicit commands. It must not be presented as supporting the natural
+multi-file Clang-driver link until the package is rebuilt on the approved
+upstream patch stack.
 
-Each instance's initial Wasm memory is 256 MiB, the stack is 32 MiB, and memory
-may grow. Compiler and runner workers own independent instances. Browser test
-attachments report actual Wasm linear-memory sizes and compile and
-initialization timings. These measurements exclude browser, JavaScript,
-filesystem, and compiled-code overhead; they are not total process memory.
+## Packages and filesystem
+
+`Compiler.data` contains the Emscripten sysroot and Clang resource headers. It
+does not contain every optional C++ library. Browser packages are produced by
+empack as one compressed archive per conda package plus `empack_env_meta.json`.
+The first locked environment contains xtensor and xtl. The compiler worker
+verifies each archive against `manifest.json` and restores it at its normal
+prefix, including `/include/xtensor` and `/include/xtl`.
+
+Package files and `/workspace` are separate. Compile and terminal requests
+replace only `/workspace`, so installed headers survive between commands. Adding
+another header-only package does not relink `Compiler.wasm` or add it to
+`Compiler.data`.
+
+## Running generated modules
+
+A generated program runs in a separate disposable worker. The Wasm inspector
+discovers each exported function's parameter and result types from the module
+type section. The runner resolves the chosen symbol through Emscripten's dynamic
+loader and calls its Wasm table entry; there is no fixed signature code table.
+
+The UI currently accepts scalar `i32`, `f32`, and `f64` parameters, in any
+count, with zero or one scalar result. Pointer, aggregate, `i64`, reference,
+multi-result, and vector interfaces remain visible but are not marked callable.
+Traps, timeout, stop, and module replacement terminate the runner.
+
+## Assets and provenance
+
+Generated assets live in the ignored `compiler/` directory. `compiler.mjs`
+stages the core runtime, multicall utilities, empack archives, isolated pipeline
+tools, and optional language services. Every staged asset has a byte size and
+SHA-256 digest in `manifest.json`.
+
+Optional service directories are `clangd`, `mlir`, and `lldb-dap`. Pipeline
+directories are `opt` and `llc`. A directory containing only part of a runtime
+is rejected. `check:compiler` accepts only source provenance, validates the LLVM
+revision and Emscripten version for optional services, and verifies every
+manifest entry.
+
+The Emscripten ES modules remain outside frontend bundles, and all URLs are
+relative to the compiler worker. This keeps deployment below a URL prefix
+working without hard-coded origins.
+
+## Memory and output
+
+The compiler and runner each start with 256 MiB of linear memory, a 32 MiB
+stack, and memory growth enabled. Isolated workers have independent memories.
+Raw stdout and stderr are captured as bytes for the persistent compiler because
+LLVM can flush in the middle of a diagnostic line. Native streams are flushed at
+every exported operation boundary.
+
+License notices for LLVM, Emscripten, WasmBolt, WABT, Graphviz and its linked
+dependencies, xtensor, and xtl are in `licenses/` and copied into every
+distribution.

@@ -9,7 +9,7 @@ import zipfile
 
 root = Path(__file__).resolve().parent.parent
 project = json.loads((root / 'package.json').read_text())
-routes = json.loads((root / 'fortitudo/site/routes.json').read_text())
+routes = json.loads((root / 'wasmbolt/site/routes.json').read_text())
 version = project['version']
 manifest = json.loads((root / 'compiler/manifest.json').read_text())
 assert manifest['origin'] == 'source', 'Build the pinned compiler first.'
@@ -65,32 +65,32 @@ def verify_site(label, read):
 
 
 verify_site('local build', lambda scope, path: (
-    root / 'fortitudo' / ('labextension' if scope == 'extension' else 'site')
+    root / 'wasmbolt' / ('labextension' if scope == 'extension' else 'site')
     / path
 ).read_bytes())
 
 
-guide = (root / 'lite/files/Fortitudo guide.md').read_bytes()
+guide = (root / 'lite/files/WasmBolt guide.md').read_bytes()
 for name in [
-    'lite/_output/files/Fortitudo guide.md',
-    'dist/site/lite/files/Fortitudo guide.md',
+    'lite/_output/files/WasmBolt guide.md',
+    'dist/site/lite/files/WasmBolt guide.md',
 ]:
     assert (root / name).read_bytes() == guide, f'{name}: stale guide'
 
 
 for name in [
-    'fortitudo/labextension/static/compiler',
+    'wasmbolt/labextension/static/compiler',
     'dist/standalone/compiler',
-    'lite/_output/extensions/fortitudo/static/compiler',
+    'lite/_output/extensions/wasmbolt/static/compiler',
     'dist/site/compiler',
-    'dist/site/lite/extensions/fortitudo/static/compiler',
+    'dist/site/lite/extensions/wasmbolt/static/compiler',
 ]:
     verify(name, lambda path, base=root / name: (base / path).read_bytes())
 
 archives = [
-    (root / 'dist/fortitudo.tgz', 'package/compiler/'),
-    (root / f'dist/fortitudo-{version}.tar.gz',
-     f'fortitudo-{version}/fortitudo/labextension/static/compiler/'),
+    (root / 'dist/wasmbolt.tgz', 'package/compiler/'),
+    (root / f'dist/wasmbolt-{version}.tar.gz',
+     f'wasmbolt-{version}/wasmbolt/labextension/static/compiler/'),
 ]
 for archive, prefix in archives:
     with tarfile.open(archive) as package:
@@ -118,13 +118,13 @@ for archive, prefix in archives:
             for contract in ['Artifact', 'Stage', 'IRunner', 'inspectWasm']:
                 assert contract in declarations, f'Missing {contract} export'
         else:
-            metadata = package.extractfile(f'fortitudo-{version}/PKG-INFO')
+            metadata = package.extractfile(f'wasmbolt-{version}/PKG-INFO')
             assert metadata is not None, 'Missing Python metadata.'
             verify_metadata(metadata.read(), archive.name)
             def read_site(scope, path):
                 directory = 'labextension' if scope == 'extension' else 'site'
                 member = package.extractfile(
-                    f'fortitudo-{version}/fortitudo/{directory}/{path}'
+                    f'wasmbolt-{version}/wasmbolt/{directory}/{path}'
                 )
                 assert member is not None, path
                 return member.read()
@@ -132,20 +132,20 @@ for archive, prefix in archives:
         assert not any('/.cache/' in name or '/node_modules/' in name
                        for name in package.getnames())
 
-wheel = root / f'dist/fortitudo-{version}-py3-none-any.whl'
+wheel = root / f'dist/wasmbolt-{version}-py3-none-any.whl'
 assert wheel.is_file(), 'Build the current wheel first.'
 with zipfile.ZipFile(wheel) as package:
-    entry = package.read(f'fortitudo-{version}.dist-info/entry_points.txt')
-    assert b'fortitudo = fortitudo.server:main' in entry
+    entry = package.read(f'wasmbolt-{version}.dist-info/entry_points.txt')
+    assert b'wasmbolt = wasmbolt.server:main' in entry
     verify_metadata(
-        package.read(f'fortitudo-{version}.dist-info/METADATA'), wheel.name
+        package.read(f'wasmbolt-{version}.dist-info/METADATA'), wheel.name
     )
     matches = [name for name in package.namelist()
                if name.endswith('/static/compiler/manifest.json')]
     assert len(matches) == 1, 'The wheel must contain one compiler copy.'
     extension = matches[0].removesuffix('static/compiler/manifest.json')
     verify_site(wheel.name, lambda scope, path: package.read(
-        (extension if scope == 'extension' else 'fortitudo/site/') + path
+        (extension if scope == 'extension' else 'wasmbolt/site/') + path
     ))
     for match in matches:
         prefix = match.removesuffix('manifest.json')

@@ -3,21 +3,14 @@
   "revision": "6566da129fde331db3f4f24856c7ea56c2c4d71c",
   "emscripten": "4.0.9",
   "llvm": "23.1.0",
-  "files": [
-    {
-      "name": "llc.cpp",
-      "url": "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-23.1.0/llvm/tools/llc/llc.cpp",
-      "sha256": "9b98f84e42ac6166bcfcb14d1535ce5ff5d93fc25b54e3ed6c3f28aa8b0f3a13"
-    },
-    {
-      "name": "NewPMDriver.cpp",
-      "url": "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-23.1.0/llvm/tools/llc/NewPMDriver.cpp",
-      "sha256": "83434d1767ffc573428fd38d4bb2dd99a02a1b2133aacfc146542ea0bdda0780"
-    },
-    {
-      "name": "NewPMDriver.h",
-      "url": "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-23.1.0/llvm/tools/llc/NewPMDriver.h",
-      "sha256": "ef39b34ee1a48a14a262db58544d32793f8d5cb5bb1f1d40deabb4b0ad2c28ff"
-    }
+  "wabt": "1.0.39",
+  "llvmRevision": "ea7d852a70e8bdfaf601d6626a760f9771b2c4b4",
+  "debuggerRevision": "24572c2967f11f63f0d3bfd461ca59350e592349",
+  "debuggerEmscripten": "6.0.8",
+  "debuggerWamrRevision": "d7050d9fe672e2d0bc65c44c966cebc0a1aca14b",
+  "pipelineTargets": [
+    "wasm32-unknown-emscripten",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu"
   ]
 }

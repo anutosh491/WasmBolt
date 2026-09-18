@@ -7,7 +7,7 @@ requires = [
 build-backend = "hatchling.build"
 
 [project]
-name = "fortitudo"
+name = "wasmbolt"
 readme = "README.md"
 license = "BSD-3-Clause"
 license-files = ["LICENSE"]
@@ -34,7 +34,7 @@ dependencies = [
 dynamic = ["version", "description", "authors", "urls", "keywords"]
 
 [project.scripts]
-fortitudo = "fortitudo.server:main"
+wasmbolt = "wasmbolt.server:main"
 
 [project.optional-dependencies]
 dev = [
@@ -51,47 +51,61 @@ fields = ["description", "authors", "urls", "keywords"]
 [tool.hatch.build.targets.sdist]
 # Twine 6.2 and the publishing action validate core metadata through 2.4.
 core-metadata-version = "2.4"
-artifacts = ["fortitudo/labextension", "fortitudo/site"]
+artifacts = ["wasmbolt/labextension", "wasmbolt/site"]
 exclude = [".github", "binder", "*.tgz"]
 
 [tool.hatch.build.targets.wheel]
 core-metadata-version = "2.4"
-# Shared data must retain the Wasm driver despite the global *.so ignore.
 ignore-vcs = true
-exclude = ["fortitudo/labextension/**"]
+exclude = ["wasmbolt/labextension/**"]
 
 [tool.hatch.build.targets.wheel.shared-data]
-"fortitudo/labextension" = "share/jupyter/labextensions/fortitudo"
-"install.json" = "share/jupyter/labextensions/fortitudo/install.json"
+"wasmbolt/labextension" = "share/jupyter/labextensions/wasmbolt"
+"install.json" = "share/jupyter/labextensions/wasmbolt/install.json"
 
 [tool.hatch.build.hooks.version]
-path = "fortitudo/_version.py"
+path = "wasmbolt/_version.py"
 
 [tool.hatch.build.hooks.jupyter-builder]
 dependencies = ["hatch-jupyter-builder>=0.5"]
 build-function = "hatch_jupyter_builder.npm_builder"
 ensured-targets = [
-    "fortitudo/site/routes.json",
-    "fortitudo/labextension/static/style.js",
-    "fortitudo/labextension/package.json",
-    "fortitudo/labextension/static/compiler/manifest.json",
-    "fortitudo/labextension/static/compiler/worker.js",
-    "fortitudo/labextension/static/compiler/Compiler.js",
-    "fortitudo/labextension/static/compiler/Compiler.wasm",
-    "fortitudo/labextension/static/compiler/Compiler.data",
-    "fortitudo/labextension/static/compiler/WasmBoltMlirOpt.so",
-    "fortitudo/labextension/static/compiler/licenses/LLVM.txt",
-    "fortitudo/labextension/static/compiler/licenses/WasmBolt.txt",
-
+    "wasmbolt/site/routes.json",
+    "wasmbolt/labextension/static/style.js",
+    "wasmbolt/labextension/package.json",
+    "wasmbolt/labextension/static/compiler/manifest.json",
+    "wasmbolt/labextension/static/compiler/worker.js",
+    "wasmbolt/labextension/static/compiler/utility-worker.js",
+    "wasmbolt/labextension/static/compiler/tool-worker.js",
+    "wasmbolt/labextension/static/compiler/clangd-worker.js",
+    "wasmbolt/labextension/static/compiler/debug-worker.js",
+    "wasmbolt/labextension/static/compiler/Compiler.js",
+    "wasmbolt/labextension/static/compiler/Compiler.wasm",
+    "wasmbolt/labextension/static/compiler/Compiler.data",
+    "wasmbolt/labextension/static/compiler/llvm/llvm.js",
+    "wasmbolt/labextension/static/compiler/llvm/llvm.wasm",
+    "wasmbolt/labextension/static/compiler/licenses/LLVM.txt",
+    "wasmbolt/labextension/static/compiler/licenses/WasmBolt.txt",
+    "wasmbolt/labextension/static/compiler/licenses/Emscripten.txt",
+    "wasmbolt/labextension/static/compiler/licenses/graphviz.txt",
+    "wasmbolt/labextension/static/compiler/licenses/libwebp.txt",
+    "wasmbolt/labextension/static/compiler/licenses/xtensor.txt",
+    "wasmbolt/labextension/static/compiler/licenses/xtl.txt",
+    "wasmbolt/labextension/static/compiler/licenses/zlib.txt",
 ]
 skip-if-exists = [
-    "fortitudo/site/routes.json",
-    "fortitudo/labextension/static/compiler/manifest.json",
-    "fortitudo/labextension/static/compiler/worker.js",
-    "fortitudo/labextension/static/compiler/Compiler.js",
-    "fortitudo/labextension/static/compiler/Compiler.wasm",
-    "fortitudo/labextension/static/compiler/Compiler.data",
-    "fortitudo/labextension/static/compiler/WasmBoltMlirOpt.so",
+    "wasmbolt/site/routes.json",
+    "wasmbolt/labextension/static/compiler/manifest.json",
+    "wasmbolt/labextension/static/compiler/worker.js",
+    "wasmbolt/labextension/static/compiler/utility-worker.js",
+    "wasmbolt/labextension/static/compiler/tool-worker.js",
+    "wasmbolt/labextension/static/compiler/clangd-worker.js",
+    "wasmbolt/labextension/static/compiler/debug-worker.js",
+    "wasmbolt/labextension/static/compiler/Compiler.js",
+    "wasmbolt/labextension/static/compiler/Compiler.wasm",
+    "wasmbolt/labextension/static/compiler/Compiler.data",
+    "wasmbolt/labextension/static/compiler/llvm/llvm.js",
+    "wasmbolt/labextension/static/compiler/llvm/llvm.wasm",
 ]
 
 [tool.hatch.build.hooks.jupyter-builder.build-kwargs]
@@ -102,7 +116,7 @@ npm = ["jlpm"]
 build_cmd = "install:extension"
 npm = ["jlpm"]
 source_dir = "src"
-build_dir = "fortitudo/labextension"
+build_dir = "wasmbolt/labextension"
 
 [tool.check-wheel-contents]
 ignore = ["W002"]

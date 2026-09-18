@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>WasmBolt clangd smoke test</title>
+    <style>
+      body {
+        background: #181818;
+        color: #d4d4d4;
+        font:
+          14px/1.5 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+        margin: 2rem;
+      }
+      .pass {
+        color: #89d185;
+      }
+      .fail {
+        color: #f48771;
+      }
+      pre {
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>clangd 23.1.0 source-build smoke test</h1>
+    <pre id="status">Loading pthread runtime…</pre>
+    <script type="module">
+      const status = document.querySelector('#status');
+      const worker = new Worker('/native/clangd/smoke/worker.mjs', {
+        type: 'module'
+      });
+      const pending = new Map();
+      let nextId = 1;
+      const started = performance.now();
+      let resolveDiagnostics;
+      const diagnostics = new Promise(resolve => {
+        resolveDiagnostics = resolve;
+      });
+
+      function delay(milliseconds) {
+        return new Promise(resolve => setTimeout(resolve, milliseconds));
+      }
+
+      function send(method, params) {
+        const id = nextId++;
+        worker.postMessage({
+          kind: 'lsp',
+          message: { jsonrpc: '2.0', id, method, params }
+        });
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(
+            () => reject(new Error(`${method} timed out`)),
+            60000
+          );
+          pending.set(id, value => {
+            clearTimeout(timer);
+            resolve(value);
+          });
+        });
+      }
+
+      function notify(method, params) {
+        worker.postMessage({
+          kind: 'lsp',
+          message: { jsonrpc: '2.0', method, params }
+        });
+      }
+
+      worker.onmessage = async event => {
+        const value = event.data;
+        if (value.kind === 'progress') {
+          status.textContent = value.stage;
+          console.info(`[clangd smoke] ${value.stage}`);
+          return;
+        }
+        if (value.kind === 'stderr') {
+          console.debug('[clangd]', value.message);
+          return;
+        }
+        if (value.kind === 'error') {
+          status.className = 'fail';
+          status.textContent = value.message;
+          window.smokeResult = { ok: false, error: value.message };
+          return;
+        }
+        if (value.kind === 'lsp') {
+          if (
+            value.message.method === 'textDocument/publishDiagnostics' &&
+            value.message.params?.uri?.endsWith('/completion.cpp') &&
+            Array.isArray(value.message.params.diagnostics)
+          ) {
+            resolveDiagnostics?.(value.message.params.diagnostics);
+            resolveDiagnostics = null;
+          }
+          const resolve = pending.get(value.message.id);
+          if (resolve) {
+            pending.delete(value.message.id);
+            resolve(value.message);
+          }
+          return;
+        }
+        if (value.kind !== 'ready') {
+          return;
+        }
+
+        try {
+          const uri = 'file:///workspace/completion.cpp';
+          const source = [
+            '#include <cstdint>',
+            '#include <vector>',
+            'constexpr std::uint64_t checksum() {',
+            '  std::uint64_t result = 0;',
+            '  for (int value : {3, 1, 4, 1, 5, 9, 2, 6})',
+            '    result = (result * 33) ^ value;',
+            '  return result;',
+            '}',
+            'static_assert(checksum() == 126721418511ULL);',
+            'int main() {',
+            '  std::vector<int> values = {1, 2, 3};',
+            '  values.size();',
+            '}'
+          ].join('\n');
+          worker.postMessage({
+            kind: 'write',
+            path: '/workspace/completion.cpp',
+            contents: source
+          });
+          const initialized = await send('initialize', {
+            processId: null,
+            rootUri: 'file:///workspace',
+            capabilities: {
+              textDocument: {
+                completion: { completionItem: { snippetSupport: true } }
+              }
+            },
+            workspaceFolders: [{ uri: 'file:///workspace', name: 'workspace' }]
+          });
+          if (initialized.error) {
+            throw new Error(JSON.stringify(initialized.error));
+          }
+          notify('initialized', {});
+          notify('textDocument/didOpen', {
+            textDocument: {
+              uri,
+              languageId: 'cpp',
+              version: 1,
+              text: source
+            }
+          });
+          const published = await Promise.race([
+            diagnostics,
+            delay(30000).then(() => null)
+          ]);
+          if (!published) {
+            throw new Error('clangd did not publish document diagnostics');
+          }
+          const errors = published.filter(item => item.severity === 1);
+          if (errors.length) {
+            throw new Error(
+              `constexpr document errors: ${JSON.stringify(errors)}`
+            );
+          }
+          const completion = await send('textDocument/completion', {
+            textDocument: { uri },
+            position: { line: 11, character: 9 },
+            context: { triggerKind: 2, triggerCharacter: '.' }
+          });
+          const items = Array.isArray(completion.result)
+            ? completion.result
+            : (completion.result?.items ?? []);
+          const labels = items.map(item => item.label);
+          if (!labels.some(label => /size|shape|begin/.test(label))) {
+            throw new Error(
+              `No C++ member completion: ${labels.slice(0, 20).join(', ')}`
+            );
+          }
+          await delay(750);
+          notify('textDocument/didChange', {
+            textDocument: { uri, version: 2 },
+            contentChanges: [{ text: `${source}\n` }]
+          });
+          await delay(2000);
+          const repeated = await send('textDocument/completion', {
+            textDocument: { uri },
+            position: { line: 11, character: 9 },
+            context: { triggerKind: 1 }
+          });
+          const repeatedItems = Array.isArray(repeated.result)
+            ? repeated.result
+            : (repeated.result?.items ?? []);
+          if (!repeatedItems.some(item => /size|begin/.test(item.label))) {
+            throw new Error(
+              `Second completion returned no members: ${JSON.stringify(
+                repeated
+              )}`
+            );
+          }
+          status.className = 'pass';
+          const elapsed = Math.round(performance.now() - started);
+          status.textContent = [
+            'PASS',
+            `clangd: ${initialized.result?.serverInfo?.version ?? '23.1.0'}`,
+            `startup + completion: ${elapsed} ms`,
+            'constexpr stress: parsed and evaluated',
+            `second completion after idle: ${repeatedItems.length}`,
+            `C++ member completions: ${labels.length}`,
+            `sample: ${labels.slice(0, 12).join(', ')}`
+          ].join('\n');
+          window.smokeResult = { ok: true, labels, elapsed };
+        } catch (error) {
+          status.className = 'fail';
+          status.textContent = `FAIL\n${String(error)}`;
+          window.smokeResult = { ok: false, error: String(error) };
+        }
+      };
+      worker.onerror = event => {
+        const message = event.message || 'clangd worker failed';
+        status.className = 'fail';
+        status.textContent = `FAIL\n${message}`;
+        window.smokeResult = { ok: false, error: message };
+      };
+    </script>
+  </body>
+</html>

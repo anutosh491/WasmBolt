@@ -1,5 +1,12 @@
 import type { File, Progress } from './types';
 
+export type ScalarType = 'i32' | 'f32' | 'f64';
+
+export type CallSignature = Readonly<{
+  params: readonly ScalarType[];
+  results: readonly ScalarType[];
+}>;
+
 /** Browser timers use a signed 32-bit delay in milliseconds. */
 export function isTimeout(value: unknown): value is number {
   return (
@@ -15,8 +22,8 @@ export type RunRequest = Readonly<{
   module: string;
   files: readonly File[];
   symbol: string;
-  /** Use the selected WasmFunction's signatureCode from inspectWasm. */
-  signatureCode: number;
+  /** The signature discovered from the selected module's type section. */
+  signature: CallSignature;
   args: readonly number[];
 }>;
 

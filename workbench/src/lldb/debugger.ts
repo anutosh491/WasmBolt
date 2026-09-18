@@ -27,6 +27,8 @@ export type DebugVariable = Readonly<{
 
 export type DebugStartRequest = Readonly<{
   module: string;
+  /** Export invoked by WAMR after LLDB attaches. */
+  entry: string;
   files: readonly File[];
   sourcePaths: readonly string[];
   breakpoints: readonly DebugBreakpoint[];

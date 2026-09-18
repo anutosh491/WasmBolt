@@ -1,15 +1,16 @@
 *.bundle.*
 lib/
 node_modules/
+/node_modules
 *.log
 .eslintcache
 .stylelintcache
 *.egg-info/
 .ipynb_checkpoints
 *.tsbuildinfo
-fortitudo/labextension
+wasmbolt/labextension
 # Version file is handled by hatchling
-fortitudo/_version.py
+wasmbolt/_version.py
 
 # Integration tests
 ui-tests/test-results/
@@ -134,10 +135,11 @@ dmypy.json
 /work/
 /compiler/
 /src/generated/
-/fortitudo/site/
-/lite/files/Fortitudo guide.md
+/wasmbolt/site/
+/lite/files/WasmBolt guide.md
 runtime/.cache/
 runtime/build/
+native/mlir/.work/
 lite/_output/
 lite/brand/labextension/
 lite/.jupyterlite.doit.db

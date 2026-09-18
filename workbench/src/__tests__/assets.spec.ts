@@ -39,7 +39,9 @@ it('reports and verifies streamed asset bytes', async () => {
     .spyOn(globalThis, 'fetch')
     .mockImplementation(async url => {
       return new Response(
-        String(url).endsWith('.data') ? stream.readable : wasmStream.readable
+        new URL(String(url)).pathname.endsWith('.data')
+          ? stream.readable
+          : wasmStream.readable
       );
     });
   const progress: Progress[] = [];
@@ -75,8 +77,8 @@ it('reports and verifies streamed asset bytes', async () => {
   });
   expect(progress.at(-1)).toEqual({ phase: 'preparing' });
   expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([
-    `${base}Compiler.data`,
-    `${base}Compiler.wasm`
+    `${base}Compiler.data?sha256=${files['Compiler.data'].sha256}`,
+    `${base}Compiler.wasm?sha256=${files['Compiler.wasm'].sha256}`
   ]);
 });
 
@@ -88,7 +90,9 @@ it.each([
   'rejects truncated, oversized, or corrupt bytes: %p',
   async (bytes, error) => {
     jest.spyOn(globalThis, 'fetch').mockImplementation(async url => {
-      return new Response(String(url).endsWith('.data') ? bytes : wasm);
+      return new Response(
+        new URL(String(url)).pathname.endsWith('.data') ? bytes : wasm
+      );
     });
     await expect(assets(base, files, jest.fn())).rejects.toThrow(
       new RegExp(`Compiler.data.*${error}`)
@@ -99,7 +103,7 @@ it.each([
 it('aborts the sibling download when an asset fails', async () => {
   let aborted = false;
   jest.spyOn(globalThis, 'fetch').mockImplementation(async (url, options) => {
-    if (String(url).endsWith('.data')) {
+    if (new URL(String(url)).pathname.endsWith('.data')) {
       return new Response('Missing', { status: 404 });
     }
     return new Promise((_, reject) => {

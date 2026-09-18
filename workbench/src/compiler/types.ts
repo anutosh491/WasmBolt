@@ -136,7 +136,9 @@ export interface ICompiler {
 export const pipelines = {
   llvmPipeline: null,
   analysisPipeline: 'print<domtree>,print<loops>',
-  mlirPipeline: 'builtin.module(canonicalize,cse)'
+  mlirPipeline:
+    'builtin.module(canonicalize,cse,convert-arith-to-llvm,' +
+    'convert-func-to-llvm,reconcile-unrealized-casts)'
 } as const;
 
 export const languageLabels: Readonly<Record<Language, string>> = {
@@ -149,10 +151,10 @@ export const languageLabels: Readonly<Record<Language, string>> = {
 export const outputLabels: Readonly<Record<OutputKind, string>> = {
   assembly: 'Assembly',
   ast: 'AST',
-  ir: 'LLVM IR — before passes',
+  ir: 'LLVM IR',
   optimized: 'Optimized IR',
   analysis: 'Analysis',
-  graphs: 'Graphs',
+  graphs: 'Graphviz',
   wasm: 'Wasm module',
   mlir: 'MLIR',
   object: 'Object'
@@ -161,19 +163,16 @@ export const outputLabels: Readonly<Record<OutputKind, string>> = {
 /** Representations produced by one compilation, in workbench order. */
 export function availableOutputs(options: Options): readonly OutputKind[] {
   if (options.language === 'mlir') {
-    return ['mlir', 'graphs'];
+    return ['mlir', 'ir', 'graphs'];
   }
   return [
-    'assembly',
     ...(options.language === 'llvm' ? [] : (['ast'] as const)),
     'ir',
-    'optimized',
-    'analysis',
     'graphs',
+    'assembly',
     ...(options.target === 'wasm32-unknown-emscripten'
       ? (['wasm'] as const)
-      : []),
-    'object'
+      : [])
   ];
 }
 

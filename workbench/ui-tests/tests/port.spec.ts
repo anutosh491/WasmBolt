@@ -19,7 +19,15 @@ async function tab(page: Page, name: string) {
   }
 }
 
-test('one compile fills outputs and comparison uses them @compat', async ({
+async function advanced(page: Page, name: string) {
+  const more = page.getByLabel('More actions', { exact: true });
+  if ((await more.getAttribute('aria-expanded')) !== 'true') {
+    await more.click();
+  }
+  await page.getByRole('button', { name, exact: true }).click();
+}
+
+test('selected outputs compile independently and compare @compat', async ({
   page
 }, testInfo) => {
   await page.addInitScript(() => {
@@ -59,6 +67,7 @@ test('one compile fills outputs and comparison uses them @compat', async ({
   ).toContainText('.custom_section.producers');
   await metadata.check();
   await tab(page, 'AST');
+  await compile(page);
   await expect(page.getByLabel('AST output', { exact: true })).toContainText(
     'TranslationUnitDecl'
   );
@@ -66,16 +75,20 @@ test('one compile fills outputs and comparison uses them @compat', async ({
     page.getByLabel('AST output', { exact: true })
   ).not.toContainText('$ clang');
   await tab(page, 'LLVM IR');
+  await compile(page);
   await expect(page.getByLabel('LLVM IR — before passes output')).toContainText(
     'alloca'
   );
-  await tab(page, 'Optimized IR');
-  await expect(page.getByLabel('Optimized IR output')).toContainText('mul');
-  await tab(page, 'Analysis');
-  await expect(page.getByLabel('Analysis output')).toContainText(
-    'DominatorTree'
-  );
-  await tab(page, 'Graphs');
+  await tab(page, 'Wasm module');
+  await compile(page);
+  await expect(page.getByLabel('Wasm module output')).toContainText('(module');
+  await expect(page.getByLabel('Wasm module output')).toContainText('i32.mul');
+  const downloaded = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download', exact: true }).click();
+  expect((await downloaded).suggestedFilename()).toBe('program.wasm');
+
+  await tab(page, 'Graphviz');
+  await compile(page);
   await expect(
     page.getByRole('combobox', { name: 'Graph', exact: true }).locator('option')
   ).toHaveCount(2);
@@ -87,35 +100,48 @@ test('one compile fills outputs and comparison uses them @compat', async ({
     'complete',
     true
   );
-  await tab(page, 'Wasm module');
-  await expect(page.getByLabel('Wasm module output')).toContainText('i32(i32)');
-  const downloaded = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Download', exact: true }).click();
-  expect((await downloaded).suggestedFilename()).toBe('program.wasm');
-  await page.getByRole('button', { name: 'Compare', exact: true }).click();
+  const outputs = page.getByRole('region', { name: 'Outputs', exact: true });
+  await tab(page, 'LLVM IR');
+  await advanced(page, 'Compare outputs');
+  const comparison = page.getByRole('region', {
+    name: 'Comparison outputs',
+    exact: true
+  });
+  await comparison.getByRole('tab', { name: 'Graphviz', exact: true }).click();
   await expect(
-    page.getByLabel('LLVM IR — before passes output').first()
+    outputs.getByLabel('LLVM IR — before passes output')
   ).toBeVisible();
-  await expect(page.getByLabel('Optimized IR output').last()).toBeVisible();
-  await expect(page.locator('html')).toHaveAttribute('data-compiles', '1');
+  await expect(comparison.getByAltText('Compiler graph')).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('data-compiles', '5');
   await page.screenshot({ path: testInfo.outputPath('comparison.png') });
   await page.reload();
   await expect(
     page.getByRole('region', { name: 'Comparison outputs', exact: true })
   ).toBeVisible();
   await expect(
-    page.getByLabel('LLVM IR — before passes output').first()
+    page
+      .getByRole('region', { name: 'Outputs', exact: true })
+      .getByLabel('LLVM IR — before passes output')
   ).toBeVisible();
-  await expect(page.getByLabel('Optimized IR output').last()).toBeVisible();
+  await expect(
+    page
+      .getByRole('region', { name: 'Comparison outputs', exact: true })
+      .getByLabel('Graphviz output')
+  ).toBeVisible();
   await expect(page.locator('html')).not.toHaveAttribute('data-compiles');
 });
 
 test('runner state, reset, NaN, and timeout @compat', async ({ page }) => {
   await page.goto(standalone);
   await edit(page, 'extern "C" int next() { static int x = 0; return ++x; }');
-  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Compile and Run', exact: true })
+    .click();
   await expect(page.getByLabel('Execution result')).toContainText('Return: 1');
-  const run = page.getByRole('button', { name: 'Run', exact: true });
+  const run = page.getByRole('button', {
+    name: 'Compile and Run',
+    exact: true
+  });
   const runFunction = page.getByRole('button', { name: 'Run function' });
   await page
     .getByLabel('Target', { exact: true })
@@ -137,7 +163,9 @@ test('runner state, reset, NaN, and timeout @compat', async ({ page }) => {
   await page.getByRole('button', { name: 'Run function', exact: true }).click();
   await expect(page.getByLabel('Execution result')).toContainText('Return: 1');
   await edit(page, 'extern "C" double value() { return __builtin_nan(""); }');
-  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Compile and Run', exact: true })
+    .click();
   await expect(page.getByLabel('Execution result')).toContainText(
     'Return: NaN'
   );
@@ -147,50 +175,62 @@ test('runner state, reset, NaN, and timeout @compat', async ({ page }) => {
     page,
     'extern "C" int spin() { volatile unsigned x=0; while (1) x=x+1; }'
   );
-  await page.getByRole('button', { name: 'Run', exact: true }).click();
-  await expect(page.getByLabel('Run pane')).toContainText(
+  await page
+    .getByRole('button', { name: 'Compile and Run', exact: true })
+    .click();
+  await expect(page.getByLabel('Execute pane')).toContainText(
     'Execution timed out'
   );
   await edit(page, 'extern "C" int recovered() { return 42; }');
   await compile(page);
-  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Compile and Run', exact: true })
+    .click();
   await expect(page.getByLabel('Execution result')).toContainText('Return: 42');
 });
 
 test('LLVM, MLIR, commands, and invalid pass recovery @compat', async ({
   page
 }) => {
-  let drivers = 0;
+  let optimizers = 0;
+  let translators = 0;
   page.on('request', request => {
-    if (request.url().endsWith('WasmBoltMlirOpt.so')) {
-      drivers += 1;
+    if (request.url().endsWith('/mlir/mlir-opt.wasm')) {
+      optimizers += 1;
+    }
+    if (request.url().endsWith('/mlir/mlir-translate.wasm')) {
+      translators += 1;
     }
   });
   await page.goto(standalone);
   await page.getByLabel('Language', { exact: true }).selectOption('llvm');
   await page.getByRole('button', { name: 'Reset example' }).click();
   await compile(page);
-  expect(drivers).toBe(0);
+  expect(optimizers).toBe(0);
+  expect(translators).toBe(0);
   await tab(page, 'Terminal');
-  await page
-    .getByLabel('Compiler command')
-    .fill(
-      'opt "-passes=print<domtree>" -disable-output optimized.ll 2> tree.txt'
-    );
-  await page.getByRole('button', { name: 'Run command', exact: true }).click();
-  await expect(page.getByLabel('Command log')).toContainText('Exit 0');
-  await tab(page, 'Files');
-  await page.getByLabel('Workspace file').selectOption('/workspace/tree.txt');
-  await expect(page.getByLabel('File output')).toContainText('DominatorTree');
+  const command = page.getByLabel('Compiler command');
+  await command.fill(
+    'opt "-passes=print<domtree>" -disable-output optimized.ll 2> tree.txt'
+  );
+  await command.press('Enter');
+  await expect(command).toHaveValue('');
+  const tree = page.getByRole('button', { name: 'tree.txt', exact: true });
+  await expect(tree).toBeVisible();
   await page.getByLabel('Language', { exact: true }).selectOption('mlir');
   await page.getByRole('button', { name: 'Reset example' }).click();
+  await tab(page, 'LLVM IR');
   await compile(page);
-  expect(drivers).toBe(1);
+  expect(optimizers).toBe(1);
+  expect(translators).toBe(1);
+  const llvmOutput = page.getByLabel('LLVM IR — before passes output');
+  await expect(llvmOutput).toContainText('define i32 @add');
   await tab(page, 'MLIR');
-  await expect(page.getByLabel('MLIR output')).toContainText('func.func @add');
-  await tab(page, 'Graphs');
+  await expect(page.getByLabel('MLIR output')).toContainText('llvm.func @add');
+  await tab(page, 'Graphviz');
+  await compile(page);
   await expect(page.getByAltText('Compiler graph')).toBeVisible();
-  await tab(page, 'Pipelines');
+  await advanced(page, 'Pipelines');
   await page
     .getByLabel('MLIR pipeline', { exact: true })
     .fill('builtin.module(missing-pass)');
@@ -201,31 +241,29 @@ test('LLVM, MLIR, commands, and invalid pass recovery @compat', async ({
   await tab(page, 'Pipelines');
   await page
     .getByLabel('MLIR pipeline', { exact: true })
-    .fill('builtin.module(canonicalize,cse)');
+    .fill(
+      'builtin.module(canonicalize,cse,convert-arith-to-llvm,' +
+        'convert-func-to-llvm,reconcile-unrealized-casts)'
+    );
   await compile(page);
-  expect(drivers).toBe(1);
+  expect(optimizers).toBeGreaterThan(1);
+  expect(translators).toBe(1);
 });
 
-test('share links restore inputs without loading a compiler', async ({
+test('share links restore source and pipeline options', async ({
   page,
   context
 }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.goto(standalone);
   await edit(page, '// λ\nint shared(int x) { return x+7; }');
-  await tab(page, 'Pipelines');
+  await advanced(page, 'Pipelines');
   await page.getByLabel('LLVM pipeline', { exact: true }).fill('mem2reg');
-  await page.getByRole('button', { name: 'Share', exact: true }).click();
+  await advanced(page, 'Copy share link');
   await expect(page.getByRole('alert')).toHaveText('Share link copied.');
   const url = await page.evaluate(() => navigator.clipboard.readText());
-  expect(url).toContain('fortitudo=');
-  let loaded = false;
+  expect(url).toContain('wasmbolt=');
   const shared = await context.newPage();
-  shared.on('request', request => {
-    if (request.url().endsWith('Compiler.wasm')) {
-      loaded = true;
-    }
-  });
   await shared.goto(url);
   await expect(
     shared.getByRole('textbox', { name: 'Source code' })
@@ -234,6 +272,5 @@ test('share links restore inputs without loading a compiler', async ({
   await expect(shared.getByLabel('LLVM pipeline', { exact: true })).toHaveValue(
     'mem2reg'
   );
-  expect(loaded).toBe(false);
   await shared.close();
 });

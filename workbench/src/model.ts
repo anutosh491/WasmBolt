@@ -656,16 +656,20 @@ export function reduce(state: State, action: Action): State {
         }
       };
     case 'debug-console':
-      return {
-        ...state,
-        debugger: {
-          ...state.debugger,
-          console: [
-            ...state.debugger.console,
-            { channel: action.channel, text: action.text }
-          ]
-        }
-      };
+      return withDebugTerminal(
+        {
+          ...state,
+          debugger: {
+            ...state.debugger,
+            console: [
+              ...state.debugger.console,
+              { channel: action.channel, text: action.text }
+            ]
+          }
+        },
+        action.channel,
+        action.text
+      );
     case 'debug-error':
       return {
         ...state,
@@ -755,6 +759,30 @@ export function hasComparison(area: Area | null): boolean {
     : area.children.some(hasComparison);
 }
 
+function withDebugTerminal(
+  state: State,
+  channel: DebugState['console'][number]['channel'],
+  text: string
+): State {
+  const value = text.replace(/\n$/, '');
+  if (!value && channel !== 'input') {
+    return state;
+  }
+  const input = channel === 'input';
+  const error = channel === 'stderr';
+  const stage: Stage = {
+    name: 'lldb',
+    status: 'success',
+    commands: input ? [`lldb${value ? ` ${value}` : ''}`] : [],
+    diagnostics: [],
+    stdout: input || error ? '' : value,
+    stderr: error ? value : '',
+    exitCode: 0,
+    duration: 0
+  };
+  return { ...state, terminal: [...state.terminal, stage] };
+}
+
 function selectModule(state: State, path: string | null): State {
   const previous = state.execution;
   const execution: Execution = {
@@ -775,7 +803,7 @@ function selectModule(state: State, path: string | null): State {
   }
   try {
     const info = inspectWasm(file.data);
-    const supported = info.functions.filter(fn => fn.signatureCode !== null);
+    const supported = info.functions.filter(fn => fn.callable);
     const old = previous.info?.functions.find(
       fn => fn.name === previous.symbol
     );
@@ -833,8 +861,9 @@ function outputSelection(
   const kinds = availableOutputs(options);
   const primary = outputs?.primary ?? 'assembly';
   const comparison = outputs?.comparison ?? 'optimized';
+  const defaultPrimary = kinds.includes('assembly') ? 'assembly' : kinds[0];
   return {
-    primary: kinds.includes(primary) ? primary : kinds[0],
+    primary: kinds.includes(primary) ? primary : defaultPrimary,
     comparison: kinds.includes(comparison) ? comparison : kinds[1]
   };
 }

@@ -1,31 +1,18 @@
+#include "lld/Common/Driver.h"
 #include "clang/Basic/TargetOptions.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/CompilerInvocation.h"
 #include "clang/FrontendTool/Utils.h"
 #include "clang/Tooling/Tooling.h"
-#include "lld/Common/Driver.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/Config/llvm-config.h"
-#include "llvm/IR/LegacyPassManager.h"
-#include "llvm/IR/Module.h"
-#include "llvm/IR/Verifier.h"
-#include "llvm/IRReader/IRReader.h"
 #include "llvm/MC/TargetRegistry.h"
-#include "llvm/Passes/PassBuilder.h"
-#include "llvm/Support/CodeGen.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
-#include "llvm/Support/SourceMgr.h"
-#include "llvm/Support/StringSaver.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetOptions.h"
-#include "llvm/TargetParser/Triple.h"
 
 #include <dlfcn.h>
 #include <emscripten.h>
@@ -33,20 +20,16 @@
 #include <graphviz/gvc.h>
 #include <graphviz/gvcext.h>
 
-#include <cmath>
-#include <cstdio>
+#include <cstddef>
 #include <cstdint>
-#include <limits>
+#include <cstdio>
 #include <memory>
-#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 LLD_HAS_DRIVER(wasm)
-
-extern "C" int wasmbolt_llc_main(int argc, char **argv);
 
 extern "C" {
 extern gvplugin_library_t gvplugin_dot_layout_LTX_library;
@@ -65,14 +48,15 @@ struct FlushStreams {
 };
 
 std::string CallError;
+bool CanRunAgain = true;
 
 class ExecuteCompilerToolAction final : public clang::tooling::ToolAction {
 public:
-  bool runInvocation(
-      std::shared_ptr<clang::CompilerInvocation> Invocation,
-      clang::FileManager *Files,
-      std::shared_ptr<clang::PCHContainerOperations> PCHContainerOps,
-      clang::DiagnosticConsumer *DiagConsumer) override {
+  bool
+  runInvocation(std::shared_ptr<clang::CompilerInvocation> Invocation,
+                clang::FileManager *Files,
+                std::shared_ptr<clang::PCHContainerOperations> PCHContainerOps,
+                clang::DiagnosticConsumer *DiagConsumer) override {
     clang::CompilerInstance Compiler(std::move(Invocation),
                                      std::move(PCHContainerOps));
     Compiler.setVirtualFileSystem(Files->getVirtualFileSystemPtr());
@@ -98,16 +82,18 @@ void initializeTargets() {
   (void)Initialized;
 }
 
-std::vector<std::string> tokenize(llvm::StringRef Command) {
-  llvm::BumpPtrAllocator Allocator;
-  llvm::StringSaver Saver(Allocator);
-  llvm::SmallVector<const char *, 32> Tokens;
-  llvm::cl::TokenizeGNUCommandLine(Command, Saver, Tokens);
-
+std::vector<std::string> unpackArguments(const char *Packed, std::size_t Size) {
   std::vector<std::string> Result;
-  Result.reserve(Tokens.size());
-  for (const char *Token : Tokens)
-    Result.emplace_back(Token);
+  if (!Packed || !Size || Packed[Size - 1] != '\0')
+    return Result;
+
+  const char *Start = Packed;
+  for (std::size_t I = 0; I < Size; ++I) {
+    if (Packed[I] != '\0')
+      continue;
+    Result.emplace_back(Start, Packed + I);
+    Start = Packed + I + 1;
+  }
   return Result;
 }
 
@@ -132,190 +118,15 @@ int runLld(const std::vector<std::string> &Args) {
   const lld::Result Result = lld::lldMain(
       llvm::ArrayRef<const char *>(Argv), llvm::outs(), llvm::errs(),
       llvm::ArrayRef<lld::DriverDef>(&WasmDriver, 1));
-  return Result.retCode == 0 && Result.canRunAgain ? 0 : 1;
-}
-
-int runOpt(const std::vector<std::string> &Args) {
-  std::string Input;
-  std::string Output = "-";
-  std::string Pipeline = "default<O2>";
-  std::string TargetTriple;
-  std::string CPU = "generic";
-  std::string Features;
-  bool DisableOutput = false;
-
-  for (std::size_t I = 1; I < Args.size(); ++I) {
-    llvm::StringRef Arg = Args[I];
-    auto NextValue = [&](llvm::StringRef Option, std::string &Value) {
-      if (Arg == Option && I + 1 < Args.size()) {
-        Value = Args[++I];
-        return true;
-      }
-      llvm::StringRef WithEquals = Arg;
-      if (WithEquals.consume_front(Option) && WithEquals.consume_front("=")) {
-        Value = WithEquals.str();
-        return true;
-      }
-      return false;
-    };
-
-    if (Arg == "-o" && I + 1 < Args.size()) {
-      Output = Args[++I];
-    } else if (Arg == "-disable-output") {
-      DisableOutput = true;
-    } else if (Arg == "-S") {
-      continue;
-    } else if (Arg.consume_front("-passes=")) {
-      Pipeline = Arg.str();
-    } else if (Arg.consume_front("--passes=")) {
-      Pipeline = Arg.str();
-    } else if (NextValue("-mtriple", TargetTriple) ||
-               NextValue("--mtriple", TargetTriple) ||
-               NextValue("-mcpu", CPU) || NextValue("--mcpu", CPU) ||
-               NextValue("-mattr", Features) ||
-               NextValue("--mattr", Features)) {
-      continue;
-    } else if (!Arg.starts_with("-")) {
-      Input = Arg.str();
-    } else {
-      llvm::errs() << "opt: unsupported in-process option '" << Arg << "'\n";
-      return 2;
-    }
-  }
-
-  if (Input.empty()) {
-    llvm::errs() << "opt: no input LLVM IR file\n";
-    return 2;
-  }
-
-  llvm::LLVMContext Context;
-  llvm::SMDiagnostic Diagnostic;
-  std::unique_ptr<llvm::Module> Module =
-      llvm::parseIRFile(Input, Diagnostic, Context);
-  if (!Module) {
-    Diagnostic.print("opt", llvm::errs());
-    return 1;
-  }
-
-  std::unique_ptr<llvm::TargetMachine> TM;
-  if (!TargetTriple.empty()) {
-    llvm::Triple Triple(llvm::Triple::normalize(TargetTriple));
-    std::string Error;
-    const llvm::Target *Target =
-        llvm::TargetRegistry::lookupTarget(Triple, Error);
-    if (!Target) {
-      llvm::errs() << "opt: " << Error << '\n';
-      return 1;
-    }
-    llvm::TargetOptions Options;
-    std::optional<llvm::Reloc::Model> Relocation;
-    if (Triple.isWasm())
-      Relocation = llvm::Reloc::PIC_;
-    TM.reset(Target->createTargetMachine(Triple, CPU, Features, Options,
-                                         Relocation));
-    if (!TM) {
-      llvm::errs() << "opt: could not create target machine for '"
-                   << TargetTriple << "'\n";
-      return 1;
-    }
-    const auto Layout = TM->createDataLayout();
-    if ((!Module->getTargetTriple().str().empty() &&
-         Module->getTargetTriple() != Triple) ||
-        (!Module->getDataLayoutStr().empty() &&
-         Module->getDataLayout() != Layout)) {
-      llvm::errs() << "opt: input target or data layout does not match '"
-                   << TargetTriple << "'\n";
-      return 1;
-    }
-    Module->setTargetTriple(Triple);
-    Module->setDataLayout(Layout);
-  }
-
-  llvm::LoopAnalysisManager LAM;
-  llvm::FunctionAnalysisManager FAM;
-  llvm::CGSCCAnalysisManager CGAM;
-  llvm::ModuleAnalysisManager MAM;
-  llvm::PassBuilder PB(TM.get());
-  PB.registerModuleAnalyses(MAM);
-  PB.registerCGSCCAnalyses(CGAM);
-  PB.registerFunctionAnalyses(FAM);
-  PB.registerLoopAnalyses(LAM);
-  PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
-
-  llvm::ModulePassManager MPM;
-  if (llvm::Error Error = PB.parsePassPipeline(MPM, Pipeline)) {
-    llvm::errs() << "opt: " << llvm::toString(std::move(Error)) << '\n';
-    return 1;
-  }
-  MPM.run(*Module, MAM);
-
-  if (llvm::verifyModule(*Module, &llvm::errs()))
-    return 1;
-  if (DisableOutput)
-    return 0;
-  if (Output == "-") {
-    Module->print(llvm::outs(), nullptr);
-    return 0;
-  }
-
-  std::error_code EC;
-  llvm::raw_fd_ostream OS(Output, EC, llvm::sys::fs::OF_Text);
-  if (EC) {
-    llvm::errs() << "opt: cannot open " << Output << ": " << EC.message()
-                 << '\n';
-    return 1;
-  }
-  Module->print(OS, nullptr);
-  return 0;
-}
-
-int runLlc(const std::vector<std::string> &Args) {
-  std::vector<char *> Argv;
-  Argv.reserve(Args.size());
-  for (const std::string &Arg : Args)
-    Argv.push_back(const_cast<char *>(Arg.c_str()));
-
-  // llc's command-line options are process globals. Reset their values around
-  // every invocation so the browser can run independent llc commands without
-  // leaking flags from an earlier command.
-  llvm::cl::ResetAllOptionOccurrences();
-  struct ResetLlcOptions {
-    ~ResetLlcOptions() { llvm::cl::ResetAllOptionOccurrences(); }
-  } Reset;
-  return wasmbolt_llc_main(static_cast<int>(Argv.size()), Argv.data());
-}
-
-int runMlirOpt(const std::vector<std::string> &Args) {
-  using MlirOptMain = int (*)(int, char **);
-  static MlirOptMain Driver = [] {
-    void *Handle = dlopen("/lib/WasmBoltMlirOpt.so", RTLD_NOW | RTLD_LOCAL);
-    if (!Handle) {
-      llvm::errs() << "mlir-opt: unable to load driver: " << dlerror() << '\n';
-      return static_cast<MlirOptMain>(nullptr);
-    }
-    dlerror();
-    auto *Entry = reinterpret_cast<MlirOptMain>(
-        dlsym(Handle, "wasmbolt_mlir_opt_main"));
-    if (const char *Error = dlerror())
-      llvm::errs() << "mlir-opt: unable to resolve driver: " << Error << '\n';
-    return Entry;
-  }();
-  if (!Driver)
-    return 1;
-
-  std::vector<char *> Argv;
-  Argv.reserve(Args.size());
-  for (const std::string &Arg : Args)
-    Argv.push_back(const_cast<char *>(Arg.c_str()));
-  return Driver(static_cast<int>(Argv.size()), Argv.data());
+  CanRunAgain = Result.canRunAgain;
+  return Result.retCode;
 }
 
 std::unordered_map<std::string, void *> LoadedModules;
 
 std::string renderDotToSvg(llvm::StringRef Dot) {
   lt_symlist_t Plugins[] = {
-      {"gvplugin_dot_layout_LTX_library",
-       &gvplugin_dot_layout_LTX_library},
+      {"gvplugin_dot_layout_LTX_library", &gvplugin_dot_layout_LTX_library},
       {"gvplugin_core_LTX_library", &gvplugin_core_LTX_library},
       {nullptr, nullptr},
   };
@@ -420,12 +231,10 @@ void *loadSymbol(const char *ModulePath, const char *Symbol) {
 
 } // namespace
 
-extern "C" EMSCRIPTEN_KEEPALIVE int run_command(const char *Command) {
+extern "C" EMSCRIPTEN_KEEPALIVE int run_tool(const char *Packed,
+                                             std::size_t Size) {
   FlushStreams Flush;
-  if (Command == nullptr)
-    return 2;
-
-  std::vector<std::string> Args = tokenize(Command);
+  std::vector<std::string> Args = unpackArguments(Packed, Size);
   if (Args.empty())
     return 2;
 
@@ -434,12 +243,6 @@ extern "C" EMSCRIPTEN_KEEPALIVE int run_command(const char *Command) {
     return runClang(std::move(Args));
   if (Program == "wasm-ld" || Program == "ld.lld")
     return runLld(Args);
-  if (Program == "opt")
-    return runOpt(Args);
-  if (Program == "llc")
-    return runLlc(Args);
-  if (Program == "mlir-opt")
-    return runMlirOpt(Args);
   if (Program == "dot")
     return runDot(Args);
 
@@ -466,41 +269,16 @@ extern "C" EMSCRIPTEN_KEEPALIVE const char *available_targets() {
   return Targets.c_str();
 }
 
-// Signature codes:
-//   0: i32(), 1: i32(i32), 2: i32(i32, i32)
-//   3: f64(), 4: f64(f64), 5: f64(f64, f64), 6: void()
-extern "C" EMSCRIPTEN_KEEPALIVE double
-load_and_call_numeric(const char *ModulePath, const char *Symbol,
-                      std::int32_t Signature, double A, double B) {
+extern "C" EMSCRIPTEN_KEEPALIVE int wasmbolt_can_run_again() {
+  return CanRunAgain ? 1 : 0;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE std::uintptr_t
+resolve_symbol(const char *ModulePath, const char *Symbol) {
   FlushStreams Flush;
   CallError.clear();
   void *Address = loadSymbol(ModulePath, Symbol);
-  if (!Address)
-    return std::numeric_limits<double>::quiet_NaN();
-
-  switch (Signature) {
-  case 0:
-    return reinterpret_cast<std::int32_t (*)()>(Address)();
-  case 1:
-    return reinterpret_cast<std::int32_t (*)(std::int32_t)>(Address)(
-        static_cast<std::int32_t>(A));
-  case 2:
-    return reinterpret_cast<std::int32_t (*)(std::int32_t, std::int32_t)>(
-        Address)(static_cast<std::int32_t>(A), static_cast<std::int32_t>(B));
-  case 3:
-    return reinterpret_cast<double (*)()>(Address)();
-  case 4:
-    return reinterpret_cast<double (*)(double)>(Address)(A);
-  case 5:
-    return reinterpret_cast<double (*)(double, double)>(Address)(A, B);
-  case 6:
-    reinterpret_cast<void (*)()>(Address)();
-    return 0.0;
-  default:
-    CallError = "Unsupported call signature";
-    llvm::errs() << CallError << '\n';
-    return std::numeric_limits<double>::quiet_NaN();
-  }
+  return reinterpret_cast<std::uintptr_t>(Address);
 }
 
 // A successful floating-point call may itself return NaN.

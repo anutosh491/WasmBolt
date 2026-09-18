@@ -15,12 +15,12 @@ export function createSharing(location: URL): ISharing {
         return null;
       }
       restored = true;
-      const value = location.searchParams.get('fortitudo');
+      const value = location.searchParams.get('wasmbolt');
       return value === null ? null : decodeShare(value);
     },
     async copy(session) {
       const url = new URL(location.href);
-      url.searchParams.set('fortitudo', encodeShare(session));
+      url.searchParams.set('wasmbolt', encodeShare(session));
       await navigator.clipboard.writeText(url.href);
     }
   };

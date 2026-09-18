@@ -106,7 +106,7 @@ async function handle(input: DebuggerInput): Promise<void> {
         const variables = await frameVariables(input.frameId);
         event({ type: 'frame', frameId: input.frameId, variables });
       } else {
-        rawCommand(input.command);
+        await rawCommand(input.command);
       }
     }
     reply({ kind: 'response', id: input.id });
@@ -151,7 +151,11 @@ async function start(base: string, startRequest: DebugStartRequest) {
       'wasmbolt_dap_prepare_wamr_session',
       'number',
       ['string', 'string', 'string'],
-      [startRequest.module, '', JSON.stringify(startRequest.argv)]
+      [
+        startRequest.module,
+        startRequest.entry,
+        JSON.stringify(startRequest.argv)
+      ]
     )
   );
   if (prepared !== 0) {
@@ -222,7 +226,7 @@ async function loadModule(base: URL): Promise<DebuggerModule> {
   return (loader.default as DebuggerFactory)({
     noInitialRun: true,
     locateFile: (path: string) => new URL(path, base).href,
-    mainScriptUrlOrBlob: loaderUrl.href,
+    mainScriptUrlOrBlob: new URL('lldb-dap.worker.js', base).href,
     wasmBinary: wasm,
     instantiateWasm: (
       imports: WebAssembly.Imports,
@@ -285,15 +289,16 @@ async function control(action: DebugControl): Promise<void> {
   await dap(command, { threadId: threadId ?? 1 });
 }
 
-function rawCommand(command: string): void {
-  const output = module!.ccall(
-    'wasmbolt_lldb_command',
-    'string',
-    ['string'],
-    [command]
-  );
-  if (typeof output === 'string' && output) {
-    consoleEvent('console', output.replace(/\n$/, ''));
+async function rawCommand(command: string): Promise<void> {
+  const frameId = frames[0]?.id;
+  const response = await dap('evaluate', {
+    expression: command,
+    context: 'repl',
+    ...(frameId === undefined ? {} : { frameId })
+  });
+  const body = isRecord(response.body) ? response.body : {};
+  if (typeof body.result === 'string' && body.result) {
+    consoleEvent('console', body.result.replace(/\n$/, ''));
   }
 }
 

@@ -1,0 +1,18 @@
+diff --git a/clang/lib/AST/ByteCode/Interp.cpp b/clang/lib/AST/ByteCode/Interp.cpp
+index 58bbf4aaf5f8..4ba72cd8a211 100644
+--- a/clang/lib/AST/ByteCode/Interp.cpp
++++ b/clang/lib/AST/ByteCode/Interp.cpp
+@@ -40,8 +40,11 @@ using namespace clang::interp;
+ // We disable it on MSVC generally since it doesn't seem to be able
+ // to handle the way we use tailcalls.
+ // PPC can't tail-call external calls, which is a problem for InterpNext.
+-#if defined(_MSC_VER) || defined(__powerpc__) || !defined(MUSTTAIL) ||         \
+-    defined(__i386__) || defined(__sparc__)
++// Some runtimes cannot transform or execute tail calls. They may explicitly
++// select the existing loop interpreter instead.
++#if defined(_MSC_VER) || defined(__powerpc__) ||                             \
++    defined(CLANG_INTERP_DISABLE_TAILCALLS) || !defined(MUSTTAIL) ||         \
++    defined(__i386__) || defined(__sparc__)
+ #undef MUSTTAIL
+ #define MUSTTAIL
+ #define USE_TAILCALLS 0

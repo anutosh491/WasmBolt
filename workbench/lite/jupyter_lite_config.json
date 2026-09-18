@@ -2,7 +2,7 @@
   "LiteBuildConfig": {
     "no_sourcemaps": true,
     "contents": ["files"],
-    "federated_extensions": ["../fortitudo/labextension", "brand/labextension"]
+    "federated_extensions": ["../wasmbolt/labextension", "brand/labextension"]
   },
   "XeusAddon": {
     "empack_config": "empack_config.yaml",

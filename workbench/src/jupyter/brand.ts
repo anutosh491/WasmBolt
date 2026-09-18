@@ -7,7 +7,7 @@ let logo: Widget | null = null;
 
 // Bundled only by lite/brand; installed JupyterLab keeps its own branding.
 const plugin: JupyterFrontEndPlugin<void> = {
-  id: 'fortitudo:lite-brand',
+  id: 'wasmbolt:lite-brand',
   description: 'Link the JupyterLite logo to the WasmBolt home page.',
   autoStart: true,
   optional: [ILabShell],

@@ -18,15 +18,15 @@ import unittest
 from unittest.mock import patch
 from urllib.request import urlopen
 
-from fortitudo import __version__
-from fortitudo.server import SiteHandler, main, open_browser
+from wasmbolt import __version__
+from wasmbolt.server import SiteHandler, main, open_browser
 
 
 class ServerTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         root = Path(self.directory.name)
-        (root / 'index.html').write_text('<h1>Fortitudo</h1>')
+        (root / 'index.html').write_text('<h1>WasmBolt</h1>')
         (root / 'worker.js').write_text('self.onmessage = () => {};')
         (root / 'module.wasm').write_bytes(b'\0asm')
         (root / 'secret.txt').write_text('Not in the asset manifest')
@@ -64,6 +64,15 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(primary[0], 200)
         self.assertEqual(primary[2], alias[2])
         self.assertEqual(primary[1]['Content-Type'], 'text/javascript')
+        self.assertEqual(
+            primary[1]['Cross-Origin-Opener-Policy'], 'same-origin'
+        )
+        self.assertEqual(
+            primary[1]['Cross-Origin-Embedder-Policy'], 'require-corp'
+        )
+        self.assertEqual(
+            primary[1]['Cross-Origin-Resource-Policy'], 'same-origin'
+        )
         status, headers, body = self.request('/compiler/module.wasm', 'HEAD')
         self.assertEqual(status, 200)
         self.assertEqual(headers['Content-Type'], 'application/wasm')
@@ -113,7 +122,7 @@ class LauncherTests(unittest.TestCase):
 
     def test_installed_command(self):
         # Isolated mode cannot import the checkout or an unrelated installation.
-        command = [sys.executable, '-I', '-m', 'fortitudo']
+        command = [sys.executable, '-I', '-m', 'wasmbolt']
         version = subprocess.check_output(command + ['--version'], text=True)
         self.assertEqual(version.strip(), __version__)
         with tempfile.TemporaryDirectory() as directory:

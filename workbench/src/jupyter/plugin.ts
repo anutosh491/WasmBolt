@@ -13,7 +13,7 @@ import { createWorkbench } from '../workbench';
 import type { Workbench } from '../workbench';
 import { createPersistence } from './persistence';
 
-const pluginId = 'fortitudo:plugin';
+const pluginId = 'wasmbolt:plugin';
 
 const plugin: JupyterFrontEndPlugin<void> = {
   id: pluginId,
@@ -41,7 +41,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
     const workspace = PageConfig.getOption('workspace') || 'default';
     const persistence = createPersistence(
       state,
-      `fortitudo:session:${path}:${workspace}`
+      `wasmbolt:session:${path}:${workspace}`
     );
     app.commands.addCommand(CommandIDs.open, {
       label: 'Open WasmBolt',

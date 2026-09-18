@@ -15,9 +15,9 @@ root = Path(__file__).resolve().parent.parent
 package = json.loads((root / 'package.json').read_text())
 version = package['version']
 dist = root / 'dist'
-npm = dist / 'fortitudo.tgz'
-sdist = dist / f'fortitudo-{version}.tar.gz'
-wheel = dist / f'fortitudo-{version}-py3-none-any.whl'
+npm = dist / 'wasmbolt.tgz'
+sdist = dist / f'wasmbolt-{version}.tar.gz'
+wheel = dist / f'wasmbolt-{version}-py3-none-any.whl'
 expected = {npm, sdist, wheel}
 archives = {
     path for pattern in ['*.tgz', '*.tar.gz', '*.whl']
@@ -29,7 +29,7 @@ if archives != expected:
 
 def check_metadata(data, label):
     metadata = BytesParser().parsebytes(data)
-    if metadata['Name'] != 'fortitudo' or metadata['Version'] != version:
+    if metadata['Name'] != 'wasmbolt' or metadata['Version'] != version:
         raise ValueError(f'{label}: package name or version does not match.')
 
 
@@ -41,14 +41,14 @@ with tarfile.open(npm) as archive:
         raise ValueError('The npm archive contains stale package metadata.')
 
 with tarfile.open(sdist) as archive:
-    member = archive.extractfile(f'fortitudo-{version}/PKG-INFO')
+    member = archive.extractfile(f'wasmbolt-{version}/PKG-INFO')
     if member is None:
         raise ValueError('The source archive has no Python metadata.')
     check_metadata(member.read(), sdist.name)
 
 with zipfile.ZipFile(wheel) as archive:
     check_metadata(
-        archive.read(f'fortitudo-{version}.dist-info/METADATA'), wheel.name
+        archive.read(f'wasmbolt-{version}.dist-info/METADATA'), wheel.name
     )
 
 for path in [sdist, wheel]:

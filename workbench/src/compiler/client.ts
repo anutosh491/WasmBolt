@@ -2,9 +2,10 @@ import { isOutput } from './protocol';
 import type { Input, Output } from './protocol';
 import type { ICompiler, Info, Progress } from './types';
 import type { RunRequest, RunResult } from './execution';
+import { createUtilityRunner } from './utility';
 
-export interface IWorker {
-  postMessage(message: Input): void;
+export interface IWorker<Message = Input> {
+  postMessage(message: Message): void;
   terminate(): void;
   onmessage: ((event: MessageEvent<unknown>) => void) | null;
   onerror: ((event: ErrorEvent) => void) | null;
@@ -25,9 +26,29 @@ type Loading = {
 /** One disposable worker owns the compiler and all of its process state. */
 export function createCompiler(
   url: URL,
-  create: () => IWorker = () => new Worker(url, { type: 'module' })
+  create: () => IWorker = () => new Worker(url, { type: 'module' }),
+  createUtility?: Parameters<typeof createUtilityRunner>[1]
 ): ICompiler {
-  return createClient(url, create);
+  const compiler = createClient(url, create);
+  const utilities = createUtilityRunner(url, createUtility);
+  return {
+    initialize: compiler.initialize,
+    compile: compiler.compile,
+    async command(request, onProgress) {
+      return (
+        (await utilities.command(request, onProgress)) ??
+        compiler.command(request, onProgress)
+      );
+    },
+    cancel() {
+      utilities.cancel();
+      compiler.cancel();
+    },
+    dispose() {
+      utilities.dispose();
+      compiler.dispose();
+    }
+  };
 }
 
 export interface IClient extends ICompiler {

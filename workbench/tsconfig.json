@@ -27,9 +27,9 @@
     "src/compiler/worker.ts",
     "src/compiler/runtime.ts",
     "src/compiler/tool-worker.ts",
+    "src/compiler/wat-worker.ts",
     "src/clangd/worker.ts",
     "src/clangd/runtime.ts",
-    "src/lldb/worker.ts",
     "src/lldb/debug-worker.ts"
   ]
 }

@@ -14,6 +14,14 @@ async function tab(page: Page, name: string) {
   }
 }
 
+async function advanced(page: Page, name: string) {
+  const more = page.getByLabel('More actions', { exact: true });
+  if ((await more.getAttribute('aria-expanded')) !== 'true') {
+    await more.click();
+  }
+  await page.getByRole('button', { name, exact: true }).click();
+}
+
 async function compile(page: Page, failed = false) {
   await page.getByRole('button', { name: 'Compile', exact: true }).click();
   await expect(page.getByRole('status').first()).toContainText(
@@ -60,7 +68,10 @@ int spin() { volatile unsigned x = 0; while (1) x = x + 1; }
 int cpp(int x) { return x + 9; }`
   );
   await compile(page);
-  await tab(page, 'Run');
+  await page
+    .getByRole('button', { name: 'Compile and Run', exact: true })
+    .click();
+  await tab(page, 'Execute');
   await expect(
     page.getByRole('combobox', { name: 'Export', exact: true })
   ).toHaveValue('');
@@ -94,12 +105,11 @@ int cpp(int x) { return x + 9; }`
   await expect(page.getByLabel('Execution result')).toContainText(
     'Stderr: standard error'
   );
-  await page
-    .getByRole('combobox', { name: 'Export', exact: true })
-    .selectOption('wide');
   await expect(
-    page.getByRole('button', { name: 'Run function' })
-  ).toBeDisabled();
+    page
+      .getByRole('combobox', { name: 'Export', exact: true })
+      .locator('option[value="wide"]')
+  ).toHaveCount(0);
   await context.setOffline(true);
   await page
     .getByRole('combobox', { name: 'Export', exact: true })
@@ -111,7 +121,7 @@ int cpp(int x) { return x + 9; }`
     .getByRole('combobox', { name: 'Export', exact: true })
     .selectOption('trap');
   await page.getByRole('button', { name: 'Run function' }).click();
-  await expect(page.getByLabel('Run pane')).toContainText('unreachable');
+  await expect(page.getByLabel('Execute pane')).toContainText('unreachable');
   await expect(page.getByLabel('Execution result')).toContainText(
     'before trap'
   );
@@ -124,9 +134,11 @@ int cpp(int x) { return x + 9; }`
     .getByRole('combobox', { name: 'Export', exact: true })
     .selectOption('spin');
   await page.getByRole('button', { name: 'Run function' }).click();
-  await expect(page.getByLabel('Run pane')).toContainText('Running program');
+  await expect(page.getByLabel('Execute pane')).toContainText(
+    'Running program'
+  );
   await page
-    .getByLabel('Run pane')
+    .getByLabel('Execute pane')
     .getByRole('button', { name: 'Stop', exact: true })
     .click();
   await expect(
@@ -140,7 +152,9 @@ int cpp(int x) { return x + 9; }`
     page.getByLabel('Assembly output', { exact: true })
   ).toContainText('i0');
   await edit(page, 'int main() { return 4; }');
-  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Compile and Run', exact: true })
+    .click();
   await expect(page.getByLabel('Execution result')).toContainText('Return: 4');
 });
 
@@ -149,15 +163,17 @@ test('partial builds, invalid IR targets, and empty graphs recover', async ({
 }) => {
   await page.goto(standalone);
   await edit(page, 'int square(int x) { return x*x; }');
-  await tab(page, 'Pipelines');
+  await advanced(page, 'Pipelines');
   await page
     .getByLabel('Analysis pipeline', { exact: true })
     .fill('missing-analysis');
-  await compile(page, true);
+  await tab(page, 'Assembly');
+  await compile(page);
   await expect(
     page.getByLabel('Assembly output', { exact: true })
   ).toContainText('square');
   await tab(page, 'AST');
+  await compile(page);
   await expect(page.getByLabel('AST output', { exact: true })).toContainText(
     'TranslationUnitDecl'
   );
@@ -166,29 +182,28 @@ test('partial builds, invalid IR targets, and empty graphs recover', async ({
     .getByLabel('Analysis pipeline', { exact: true })
     .fill('print<domtree>,print<loops>');
   await page.getByLabel('LLVM pipeline', { exact: true }).fill('missing-pass');
+  await tab(page, 'Graphviz');
   await compile(page, true);
   await tab(page, 'LLVM IR');
   await expect(page.getByLabel('LLVM IR — before passes output')).toContainText(
     'define'
   );
-  await tab(page, 'Assembly');
-  await expect(
-    page.getByLabel('Assembly output', { exact: true })
-  ).toContainText('Skipped');
+  await tab(page, 'Graphviz');
+  await expect(page.getByLabel('Graphviz output')).toContainText('Skipped');
   await tab(page, 'Pipelines');
   await page.getByLabel('LLVM pipeline', { exact: true }).fill('');
   await edit(page, 'extern int declaration(int);');
+  await tab(page, 'Graphviz');
   await compile(page);
-  await tab(page, 'Graphs');
-  await expect(page.getByLabel('Graphs output')).toContainText('No graphs');
+  await expect(page.getByLabel('Graphviz output')).toContainText('No graphs');
   await page.getByLabel('Language', { exact: true }).selectOption('llvm');
   for (const target of [
     'target triple = "x86_64-unknown-linux-gnu"',
     'target datalayout = "e-p:64:64"'
   ]) {
     await edit(page, `${target}\ndefine i32 @value() { ret i32 1 }`);
-    await compile(page, true);
     await tab(page, 'LLVM IR');
+    await compile(page, true);
     await expect(
       page.getByLabel('LLVM IR — before passes output')
     ).toContainText('does not match');
@@ -199,7 +214,7 @@ test('partial builds, invalid IR targets, and empty graphs recover', async ({
 
 test('MLIR retry and commands preserve build artifacts', async ({ page }) => {
   let downloads = 0;
-  await page.route('**/WasmBoltMlirOpt.so', route => {
+  await page.route('**/mlir/mlir-opt.wasm', route => {
     downloads += 1;
     return downloads === 1
       ? route.fulfill({ status: 503, body: 'unavailable' })
@@ -208,8 +223,8 @@ test('MLIR retry and commands preserve build artifacts', async ({ page }) => {
   await page.goto(standalone);
   await page.getByLabel('Language', { exact: true }).selectOption('mlir');
   await page.getByRole('button', { name: 'Reset example' }).click();
-  await compile(page, true);
   await tab(page, 'MLIR');
+  await compile(page, true);
   await expect(page.getByLabel('MLIR output')).toContainText('503');
   await compile(page);
   expect(downloads).toBe(2);
@@ -219,27 +234,24 @@ test('MLIR retry and commands preserve build artifacts', async ({ page }) => {
       '-o manual.mlir'
   );
   await expect(page.getByLabel('Command log')).toContainText('Exit 0');
+  expect(downloads).toBe(3);
   await command(page, 'mlir-opt manual.mlir > "copied module.mlir"');
-  expect(downloads).toBe(2);
-  await tab(page, 'Files');
+  expect(downloads).toBe(4);
   await page
-    .getByLabel('Workspace file')
-    .selectOption('/workspace/copied module.mlir');
-  await expect(page.getByLabel('File output')).toContainText('func.func');
+    .getByRole('button', { name: 'copied module.mlir', exact: true })
+    .click();
+  await expect(page.getByLabel('Source code')).toContainText('func.func');
   await page.getByLabel('Language', { exact: true }).selectOption('cpp');
   await edit(page, 'extern "C" int scalar() { return 17; }');
   await compile(page);
   await command(
     page,
-    'wasm-ld -shared --export-all ' +
-      '--unresolved-symbols=import-dynamic output.o -o manual.wasm'
+    'wasm-ld -shared --unresolved-symbols=import-dynamic ' +
+      'output.o -o program.wasm'
   );
-  await tab(page, 'Files');
   await page
-    .getByLabel('Workspace file')
-    .selectOption('/workspace/manual.wasm');
-  await page.getByRole('button', { name: 'Use module' }).click();
-  await page.getByRole('button', { name: 'Run function' }).click();
+    .getByRole('button', { name: 'Compile and Run', exact: true })
+    .click();
   await expect(page.getByLabel('Execution result')).toContainText('Return: 17');
   await command(page, 'wasm-ld missing.o -o broken.wasm');
   await expect(page.getByLabel('Command log')).toContainText('Exit 1');
@@ -258,7 +270,9 @@ test('MLIR retry and commands preserve build artifacts', async ({ page }) => {
     page,
     'opt "-passes=print<domtree>" ' + '-disable-output optimized.ll'
   );
-  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Compile and Run', exact: true })
+    .click();
   await expect(page.getByLabel('Execution result')).toContainText('Return: 19');
 });
 
@@ -272,9 +286,13 @@ test('missing runtime dependencies fail without breaking compilation', async ({
 extern "C" int value() { return absent(); }`
   );
   await compile(page);
-  await page.getByRole('button', { name: 'Run', exact: true }).click();
-  await expect(page.getByLabel('Run pane')).toContainText('absent');
+  await page
+    .getByRole('button', { name: 'Compile and Run', exact: true })
+    .click();
+  await expect(page.getByLabel('Execute pane')).toContainText('absent');
   await edit(page, 'extern "C" int value() { return 21; }');
-  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Compile and Run', exact: true })
+    .click();
   await expect(page.getByLabel('Execution result')).toContainText('Return: 21');
 });

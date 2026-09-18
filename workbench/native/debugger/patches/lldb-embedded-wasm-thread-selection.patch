@@ -1,0 +1,39 @@
+diff --git a/lldb/source/API/SBThread.cpp b/lldb/source/API/SBThread.cpp
+--- a/lldb/source/API/SBThread.cpp
++++ b/lldb/source/API/SBThread.cpp
+@@ -461,7 +461,11 @@ static Status ResumeNewPlan(StoppedExecutionContext exe_ctx,
+ 
+   // Why do we need to set the current thread by ID here???
+   Process *process = exe_ctx.GetProcessPtr();
+-  process->GetThreadList().SetSelectedThreadByID(thread->GetID());
++  // The embedded Wasm remote is serviced by another pthread in the same
++  // browser Worker. Re-selecting through the public thread list here can wait
++  // on that event thread indefinitely. The step already carries its thread.
++  if (!process->GetTarget().GetArchitecture().GetTriple().isWasm())
++    process->GetThreadList().SetSelectedThreadByID(thread->GetID());
+ 
+   // Release the run lock but keep the API lock.
+   TargetAPIMutex api_mutex = exe_ctx.AllowResume();
+diff --git a/lldb/tools/lldb-dap/Handler/ScopesRequestHandler.cpp b/lldb/tools/lldb-dap/Handler/ScopesRequestHandler.cpp
+--- a/lldb/tools/lldb-dap/Handler/ScopesRequestHandler.cpp
++++ b/lldb/tools/lldb-dap/Handler/ScopesRequestHandler.cpp
+@@ -32,8 +32,17 @@ ScopesRequestHandler::Run(const ScopesArguments &args) const {
+   // allow us to change the currently selected thread or frame in the GUI that
+   // I am aware of.
+   if (frame.IsValid()) {
+-    frame.GetThread().GetProcess().SetSelectedThread(frame.GetThread());
+-    frame.GetThread().SetSelectedFrame(frame.GetFrameID());
++    lldb::SBThread thread = frame.GetThread();
++    lldb::SBProcess process = thread.GetProcess();
++    const char *triple = process.GetTarget().GetTriple();
++    // The embedded WebAssembly remote is serviced by another pthread in the
++    // same browser Worker. Selecting through the public process API here can
++    // wait on that event thread indefinitely. DAP already identifies the
++    // requested frame explicitly, including for evaluate requests.
++    if (!triple || !llvm::StringRef(triple).starts_with("wasm")) {
++      process.SetSelectedThread(thread);
++      thread.SetSelectedFrame(frame.GetFrameID());
++    }
+   }
+ 
+   std::vector<protocol::Scope> scopes = dap.reference_storage.Insert(frame);

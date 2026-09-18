@@ -1,6 +1,11 @@
 import { diagnostics, uniqueDiagnostics } from '../compiler/diagnostics';
 import { isInput, isOutput } from '../compiler/protocol';
-import { invocation, serialize } from '../compiler/request';
+import {
+  debugInvocation,
+  debugWrapper,
+  invocation,
+  serialize
+} from '../compiler/request';
 import { options } from '../model';
 
 const info = {
@@ -10,9 +15,12 @@ const info = {
 };
 
 describe('compiler requests', () => {
-  it('retains each argument through GNU quoting', () => {
+  it('formats each argument as a readable shell command', () => {
     expect(serialize(['clang++', 'a b', 'say "hi"', 'a\\b', ''])).toBe(
-      '"clang++" "a b" "say \\"hi\\"" "a\\\\b" ""'
+      `clang++ 'a b' 'say "hi"' 'a\\b' ''`
+    );
+    expect(serialize(['opt', '-passes=default<O2>', 'input.ll'])).toBe(
+      "opt '-passes=default<O2>' input.ll"
     );
     expect(() => serialize(['a\0b'])).toThrow('null bytes');
   });
@@ -38,10 +46,13 @@ describe('compiler requests', () => {
     ]);
     expect(plan.steps[1].commands[0]).toContain('-std=c++23');
     expect(plan.steps[1].commands[0]).toContain('/include/c++/v1');
+    expect(plan.steps[1].commands[0]).toContain('-fvisibility=default');
+    expect(plan.steps[1].commands[0]).toContain('-fvisibility-inlines-hidden');
     expect(plan.steps[2].commands[0]).toContain('-passes=default<O2>');
     expect(plan.steps[5].commands[0]).toContain(
       '-mtriple=wasm32-unknown-emscripten'
     );
+    expect(plan.steps.at(-1)?.commands[0]).not.toContain('--export-all');
     expect(plan.source).toBe('/workspace/request-1/snippet.cpp');
   });
 
@@ -58,11 +69,123 @@ describe('compiler requests', () => {
       info,
       '/workspace/request-2'
     );
+    expect(plan.steps.map(step => step.name)).toEqual(['object', 'wasm']);
+    expect(plan.steps[0].requires).toEqual([]);
+    expect(plan.steps[0].commands[0]).toEqual(
+      expect.arrayContaining([
+        'clang++',
+        '-O2',
+        '-c',
+        '/workspace/request-2/snippet.cpp',
+        '-o',
+        '/workspace/request-2/output.o'
+      ])
+    );
+    expect(plan.steps[0].commands[0]).not.toContain('llc');
+    expect(plan.steps[1].commands[0]).toEqual([
+      'wasm-ld',
+      '-shared',
+      '--unresolved-symbols=import-dynamic',
+      '/workspace/request-2/output.o',
+      '-o',
+      '/workspace/request-2/program.wasm'
+    ]);
+  });
+
+  it('keeps opt and llc for explicit compiler representations', () => {
+    const plan = invocation(
+      {
+        id: 4,
+        source: '',
+        sourcePath: '/workspace/snippet.cpp',
+        files: [],
+        options,
+        output: 'assembly'
+      },
+      info,
+      '/workspace'
+    );
+    expect(plan.steps.map(step => step.name)).toEqual([
+      'ir',
+      'optimized',
+      'assembly'
+    ]);
+    expect(plan.steps[1].commands[0][0]).toBe('opt');
+    expect(plan.steps[2].commands[0][0]).toBe('llc');
+  });
+
+  it('honors an explicit LLVM pipeline in a runnable module', () => {
+    const plan = invocation(
+      {
+        id: 5,
+        source: '',
+        sourcePath: '/workspace/snippet.cpp',
+        files: [],
+        options: { ...options, llvmPipeline: 'mem2reg' },
+        output: 'wasm'
+      },
+      info,
+      '/workspace'
+    );
     expect(plan.steps.map(step => step.name)).toEqual([
       'ir',
       'optimized',
       'object',
       'wasm'
+    ]);
+    expect(plan.steps[1].commands[0]).toContain('-passes=mem2reg');
+    expect(plan.steps[2].commands[0][0]).toBe('llc');
+  });
+
+  it('uses the same direct module path for C', () => {
+    const plan = invocation(
+      {
+        id: 6,
+        source: '',
+        sourcePath: '/workspace/snippet.c',
+        files: [],
+        options: { ...options, language: 'c' },
+        output: 'wasm'
+      },
+      info,
+      '/workspace'
+    );
+    expect(plan.steps.map(step => step.name)).toEqual(['object', 'wasm']);
+    expect(plan.steps[0].commands[0].slice(0, 4)).toEqual([
+      'clang',
+      '-x',
+      'c',
+      '-std=c23'
+    ]);
+  });
+
+  it('plans MLIR optimization and translation with complete argv', () => {
+    const plan = invocation(
+      {
+        id: 3,
+        source: '',
+        sourcePath: '/workspace/input.mlir',
+        files: [],
+        options: { ...options, language: 'mlir' },
+        output: 'ir'
+      },
+      info,
+      '/workspace'
+    );
+    expect(plan.steps.map(step => step.name)).toEqual(['mlir', 'ir']);
+    expect(plan.steps[0].commands[0]).toEqual([
+      'mlir-opt',
+      `--pass-pipeline=${options.mlirPipeline}`,
+      '/workspace/input.mlir',
+      '-o',
+      '/workspace/optimized.mlir'
+    ]);
+    expect(plan.steps[1].commands[0]).toEqual([
+      'mlir-translate',
+      '--mlir-to-llvmir',
+      '/workspace/optimized.mlir',
+      '-o',
+      '/workspace/source.ll'
     ]);
   });
 
@@ -87,6 +210,70 @@ describe('compiler requests', () => {
     expect(plan.steps[1].commands[0]).toContain('/lib/clang/23/include');
     expect(plan.steps[1].commands[0]).not.toContain('/include');
     expect(plan.steps[2].commands[0]).toContain('-passes=default<O0>');
+  });
+
+  it('builds a standalone debug program around a selected export', () => {
+    const entry = {
+      symbol: '_Z13sum_invariantii',
+      signature: {
+        params: ['i32', 'i32'] as const,
+        results: ['i32'] as const
+      },
+      args: [2, 3]
+    };
+    const plan = debugInvocation(
+      {
+        id: 7,
+        source: '',
+        sourcePath: '/workspace/snippet.cpp',
+        files: [],
+        options
+      },
+      info,
+      '/workspace',
+      entry
+    );
+
+    expect(plan.wrapper).toEqual({
+      path: '/workspace/.wasmbolt-debug-main.cpp',
+      source: debugWrapper(entry)
+    });
+    expect(plan.wrapper?.source).toContain('asm("_Z13sum_invariantii")');
+    expect(plan.wrapper?.source).toContain('wasmbolt_debug_target(2, 3)');
+    expect(plan.commands.map(command => command[0])).toEqual([
+      'clang++',
+      'clang++',
+      'wasm-ld'
+    ]);
+    expect(plan.commands[0]).toEqual(
+      expect.arrayContaining(['-O0', '-g3', '-c'])
+    );
+    expect(plan.commands[2]).toContain('/lib/wasm32-emscripten/crt1.o');
+    expect(plan.commands[2]).not.toContain('--no-entry');
+    expect(plan.commands[2]).not.toContain('-shared');
+    expect(plan.module).toBe('/workspace/debug.wasm');
+  });
+
+  it('uses an existing main without generating a debug wrapper', () => {
+    const plan = debugInvocation(
+      {
+        id: 8,
+        source: '',
+        sourcePath: '/workspace/main.c',
+        files: [],
+        options: { ...options, language: 'c' }
+      },
+      info,
+      '/workspace',
+      null
+    );
+
+    expect(plan.wrapper).toBeNull();
+    expect(plan.generated).toEqual(['/workspace/debug.o']);
+    expect(plan.commands.map(command => command[0])).toEqual([
+      'clang',
+      'wasm-ld'
+    ]);
   });
 });
 

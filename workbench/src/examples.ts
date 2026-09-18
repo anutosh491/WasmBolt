@@ -1,13 +1,15 @@
 import type { Language } from './compiler/types';
 
 export const examples: Readonly<Record<Language, string>> = {
-  cpp: `#include <array>
-#include <numeric>
+  cpp: `int sum_invariant(int count, int scale) {
+  int total = 0;
 
-int sum_invariant(int count, int scale) {
-  std::array<int, 4> values = {1, 2, 3, 4};
-  const int total = std::accumulate(values.begin(), values.end(), 0);
-  return count > 0 ? total * scale : 0;
+  for (int i = 0; i < count; ++i) {
+    const int invariant = scale * 3;
+    total += invariant;
+  }
+
+  return total;
 }
 `,
   c: `int square_plus_one(int value) {
@@ -51,7 +53,7 @@ export const xtensorExample = `#include <xtensor/containers/xarray.hpp>
 #include <xtensor/core/xmath.hpp>
 #include <xtensor/core/xoperation.hpp>
 
-extern "C" int xtensor_broadcast_sum(int scale) {
+int xtensor_broadcast_sum(int scale) {
   xt::xarray<int> values = {{1, 2, 3}, {4, 5, 6}};
   xt::xarray<int> offsets = {10, 20, 30};
   auto shifted = values + offsets;

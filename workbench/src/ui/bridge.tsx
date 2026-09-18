@@ -11,6 +11,7 @@ import {
 import type { IClangdClient } from '../clangd/types';
 import { CommandIDs } from '../commands';
 import type { Diagnostic, Options, OutputKind } from '../compiler/types';
+import type { IWatRenderer } from '../compiler/wat';
 import type { Pane } from '../model';
 import type { IStore } from '../state';
 import { Editor } from './editor';
@@ -18,13 +19,15 @@ import { Debugger } from './debug';
 import { Explorer } from './explorer';
 import { Guide } from './guide';
 import { Output } from './outputs';
-import { Pipelines, Run, Terminal } from './tools';
+import { Execute, Pipelines, Terminal } from './tools';
 import { Controls, Diagnostics, Source } from './views';
 
 interface IBridgeProps {
   store: IStore;
   commands: CommandRegistry;
-  clangd: IClangdClient;
+  clangd: IClangdClient | null;
+  debuggerAvailable: boolean;
+  wat: IWatRenderer;
   pane: Pane | 'controls';
   output?: OutputKind;
   canShare?: boolean;
@@ -70,6 +73,8 @@ export function Bridge(props: IBridgeProps): React.ReactElement {
         execute(CommandIDs.importFile, { name, data }),
       onSelectFile: (path: string) => execute(CommandIDs.selectFile, { path }),
       onShowDebugger: () => execute(CommandIDs.showDebugger),
+      onShowDiagnostics: () => execute(CommandIDs.showDiagnostics),
+      onShowPipelines: () => execute(CommandIDs.showPipelines),
       onToggleBreakpoint: (line: number) =>
         execute(CommandIDs.toggleBreakpoint, {
           path: store.state.activeFile,
@@ -115,6 +120,7 @@ export function Bridge(props: IBridgeProps): React.ReactElement {
           <Controls
             state={state}
             {...callbacks}
+            debuggerAvailable={props.debuggerAvailable}
             onShare={props.canShare ? callbacks.onShare : undefined}
             onGuide={() => setGuideOpen(true)}
           />
@@ -127,6 +133,7 @@ export function Bridge(props: IBridgeProps): React.ReactElement {
           <Editor
             store={store}
             clangd={props.clangd}
+            debuggerAvailable={props.debuggerAvailable}
             path={state.activeFile}
             onChange={callbacks.onChange}
             onResetExample={callbacks.onResetExample}
@@ -137,22 +144,33 @@ export function Bridge(props: IBridgeProps): React.ReactElement {
     case 'explorer':
       return <Explorer state={state} {...callbacks} />;
     case 'outputs':
-    case 'comparison':
+    case 'comparison': {
+      const kind = props.output ?? 'assembly';
       return (
         <Output
           state={state}
-          kind={props.output ?? 'assembly'}
+          kind={kind}
+          renderer={props.wat}
+          active={
+            state.outputs[pane === 'outputs' ? 'primary' : 'comparison'] ===
+            kind
+          }
           {...callbacks}
         />
       );
+    }
     case 'diagnostics':
       return <Diagnostics state={state} onNavigate={callbacks.onNavigate} />;
     case 'run':
-      return <Run state={state} {...callbacks} />;
+      return <Execute state={state} {...callbacks} />;
     case 'terminal':
       return <Terminal state={state} {...callbacks} />;
     case 'debugger':
-      return <Debugger state={state} {...callbacks} />;
+      return props.debuggerAvailable ? (
+        <Debugger state={state} {...callbacks} />
+      ) : (
+        <></>
+      );
     case 'pipelines':
       return <Pipelines state={state} {...callbacks} />;
   }

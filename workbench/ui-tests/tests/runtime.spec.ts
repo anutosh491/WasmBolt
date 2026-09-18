@@ -1,9 +1,11 @@
+import { readFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 
 import type { Output } from '../../src/compiler/protocol';
 import type { Options, Result } from '../../src/compiler/types';
 
 const standalone = 'http://127.0.0.1:8765/dist/standalone/';
+const xtensorArchive = 'packages/xtensor-0.27.1-h0b0027f_0.tar.gz';
 
 test('runtime library aliases resolve to their payloads @compat', async ({
   page
@@ -39,7 +41,7 @@ test('runtime library aliases resolve to their payloads @compat', async ({
   await page
     .getByLabel('Compiler command')
     .fill(
-      'wasm-ld -shared --export-all --unresolved-symbols=import-dynamic ' +
+      'wasm-ld -shared --unresolved-symbols=import-dynamic ' +
         'output.o -L/lib -lopenblas -lz -o linked.wasm'
     );
   await page.getByRole('button', { name: 'Run command', exact: true }).click();
@@ -239,7 +241,74 @@ test('real compiler: standards, headers, targets, repetition @compat', async ({
   }
 });
 
-test('asset types and lazy MLIR loading', async ({ page, request }) => {
+test('standalone compiles the packaged xtensor example', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(standalone);
+  const source = page.getByRole('textbox', { name: 'Source code' });
+  await expect(source).toBeVisible();
+  await page.getByRole('button', { name: 'xtensor.cpp', exact: true }).click();
+  await expect(source).toContainText(
+    '#include <xtensor/containers/xarray.hpp>'
+  );
+
+  // Compile only the selected representation and its prerequisites.
+  await page.getByRole('tab', { name: 'LLVM IR', exact: true }).click();
+  await page.getByRole('button', { name: 'Compile', exact: true }).click();
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Compilation complete' })
+  ).toBeVisible();
+  const output = page.getByLabel('LLVM IR pane');
+  await expect(page.getByLabel('LLVM IR output')).toContainText(
+    'class.xt::xarray_container'
+  );
+  const downloaded = page.waitForEvent('download');
+  await output.getByRole('button', { name: 'Download' }).click();
+  const path = await (await downloaded).path();
+  if (!path) {
+    throw new Error('The LLVM IR download has no local path.');
+  }
+  expect(await readFile(path, 'utf8')).toContain('xtensor_broadcast_sum');
+  await expect(page.getByText(/file exceeds its manifest size/i)).toHaveCount(
+    0
+  );
+  expect(errors).toEqual([]);
+});
+
+test('Compile and Run keeps the normal C++ path in one worker', async ({
+  page
+}) => {
+  const requested: string[] = [];
+  page.on('request', request => requested.push(request.url()));
+  await page.goto(standalone);
+  await page
+    .getByRole('textbox', { name: 'Source code' })
+    .fill('int answer() { return 42; }');
+  await page
+    .getByRole('button', { name: 'Compile and Run', exact: true })
+    .click();
+  await expect(page.getByLabel('Execution result')).toContainText('Return: 42');
+
+  const log = page.getByLabel('Command log');
+  await expect(log).toContainText('clang++ -x c++');
+  await expect(log).toContainText('-O2 -c /workspace/snippet.cpp');
+  await expect(log).toContainText(
+    'wasm-ld -shared --unresolved-symbols=import-dynamic ' +
+      '/workspace/output.o ' +
+      '-o /workspace/program.wasm'
+  );
+  await expect(log).not.toContainText('wasmbolt:/workspace $ opt ');
+  await expect(log).not.toContainText('wasmbolt:/workspace $ llc ');
+  const loadedPipelineWorker = requested.some(url =>
+    /\/(opt|llc)\/[^/]+\.(js|wasm)$/.test(url)
+  );
+  expect(loadedPipelineWorker).toBe(false);
+});
+
+test('asset types, package encoding, and lazy MLIR loading', async ({
+  page,
+  request
+}) => {
   const requested: string[] = [];
   page.on('request', req => requested.push(req.url()));
   await page.goto(standalone);
@@ -250,10 +319,14 @@ test('asset types and lazy MLIR loading', async ({ page, request }) => {
     ['worker.js', /javascript/],
     ['Compiler.js', /javascript/],
     ['Compiler.wasm', /application\/wasm/],
-    ['Compiler.data', /application\/octet-stream/]
+    ['Compiler.data', /application\/octet-stream/],
+    [xtensorArchive, /application\/gzip/]
   ] as const) {
     const response = await request.head(`${standalone}compiler/${name}`);
     expect(response.status(), name).toBe(200);
     expect(response.headers()['content-type'], name).toMatch(type);
+    if (name.endsWith('.tar.gz')) {
+      expect(response.headers()['content-encoding'], name).toBeUndefined();
+    }
   }
 });

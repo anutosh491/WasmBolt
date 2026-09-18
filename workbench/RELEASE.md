@@ -1,7 +1,7 @@
-# Releasing Fortitudo
+# Releasing WasmBolt
 
 Publishing a stable GitHub release runs `publish-release.yml`, which builds,
-checks, and publishes Fortitudo to npm and PyPI using trusted publishing.
+checks, and publishes WasmBolt to npm and PyPI using trusted publishing.
 `package.json` is the version source. Staging, commits, pushing, and tags remain
 the maintainer's responsibility.
 
@@ -15,11 +15,11 @@ the maintainer's responsibility.
 4. Publish a stable GitHub release for that tag. This starts **Publish Release**
    automatically; no manual Actions run is needed.
 5. Confirm that the workflow succeeds and the expected version appears on
-   [npm](https://www.npmjs.com/package/fortitudo) and
-   [PyPI](https://pypi.org/project/fortitudo/). Install that exact Python
-   version in a fresh Python environment. Run `fortitudo`, compile a function,
-   and run both example notebooks through **Try in Jupyter**. Also check the
-   extension in a JupyterLab environment.
+   [npm](https://www.npmjs.com/package/wasmbolt) and
+   [PyPI](https://pypi.org/project/wasmbolt/). Install that exact Python version
+   in a fresh Python environment. Run `wasmbolt`, compile a function, and run
+   both example notebooks through **Try in Jupyter**. Also check the extension
+   in a JupyterLab environment.
 
 The workflow requires the tag to match the package version. Drafts wait until
 publication, and prereleases are skipped. Ordinary pushes, pull requests, and
@@ -37,7 +37,7 @@ The Actions run provides these artifacts:
 
 | Artifact               | Contents                                     |
 | ---------------------- | -------------------------------------------- |
-| `npm-distribution`     | The npm archive, `fortitudo.tgz`             |
+| `npm-distribution`     | The npm archive, `wasmbolt.tgz`              |
 | `python-distributions` | The wheel and source archive                 |
 | `distributions`        | Packages, static sites, and release metadata |
 | `browser-results`      | Browser reports and compiler measurements    |
@@ -67,6 +67,6 @@ destination. Duplicate uploads are errors and are not silently skipped. If the
 source needs a correction, prepare a new version; do not move a published tag or
 try to overwrite an existing package version.
 
-Trusted publishing uses `afshin/fortitudo`, `publish-release.yml`, and the
+Trusted publishing uses `anutosh491/WasmBolt`, `publish-release.yml`, and the
 GitHub environments `npm` and `pypi`. Keep the registry configuration in sync if
 these names change. Both environments are restricted to `v*` tags.

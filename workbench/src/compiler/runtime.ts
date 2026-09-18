@@ -1,6 +1,7 @@
 import { diagnostics, uniqueDiagnostics } from './diagnostics';
 import { files, restore } from './files';
 import type { IModuleRuntime } from './module';
+import type { IPipelineTools } from './pipeline';
 import { invocation, serialize } from './request';
 import type { Step } from './request';
 import { command } from './terminal';
@@ -30,7 +31,10 @@ export interface IRuntime {
 }
 
 /** Execute a pure build plan against an instance-owned virtual filesystem. */
-export function runtime(module: IModuleRuntime): IRuntime {
+export function runtime(
+  module: IModuleRuntime,
+  pipeline: IPipelineTools
+): IRuntime {
   const { info, fs } = module;
   return {
     info,
@@ -65,23 +69,6 @@ export function runtime(module: IModuleRuntime): IRuntime {
           });
           continue;
         }
-        if (request.options.language === 'mlir') {
-          try {
-            await module.ensureMlir(onProgress);
-          } catch (error) {
-            stages.push({
-              name: step.name,
-              status: 'failed',
-              commands: [],
-              diagnostics: [],
-              stdout: '',
-              stderr: String(error),
-              exitCode: 1,
-              duration: 0
-            });
-            continue;
-          }
-        }
         onProgress({
           phase: 'working',
           stage:
@@ -89,7 +76,13 @@ export function runtime(module: IModuleRuntime): IRuntime {
               ? 'Linking Wasm module'
               : outputLabels[step.name]
         });
-        const stage = execute(module, step, onProgress);
+        const stage = await execute(
+          request.id,
+          module,
+          pipeline,
+          step,
+          onProgress
+        );
         stages.push(stage);
         if (step.graphs) {
           for (const file of files(fs)) {
@@ -143,12 +136,30 @@ export function runtime(module: IModuleRuntime): IRuntime {
     async command(request, onProgress) {
       restore(fs, request.files);
       const parsed = command(request.command);
-      if (parsed.tool === 'mlir-opt') {
-        await module.ensureMlir(onProgress);
-      }
       onProgress({ phase: 'working', stage: parsed.tool });
       const start = performance.now();
-      const captured = module.run(parsed.command);
+      if (
+        parsed.tool === 'wasm-ld' &&
+        parsed.args.some(arg => arg.startsWith('/lib/wasm32-emscripten/'))
+      ) {
+        await module.prepareDebugSysroot(onProgress);
+      }
+      const isolated = await pipeline.run(
+        request.id,
+        parsed.args,
+        files(fs),
+        onProgress
+      );
+      if (isolated) {
+        restore(fs, isolated.files);
+      }
+      const captured = isolated
+        ? {
+            value: isolated.stage.exitCode,
+            stdout: isolated.stage.stdout,
+            stderr: isolated.stage.stderr
+          }
+        : module.run(parsed.args);
       if (parsed.stdout) {
         fs.writeFile(parsed.stdout, captured.stdout);
       }
@@ -173,20 +184,32 @@ export function runtime(module: IModuleRuntime): IRuntime {
   };
 }
 
-function execute(
+async function execute(
+  id: number,
   module: IModuleRuntime,
+  pipeline: IPipelineTools,
   step: Step,
   onProgress: (progress: Progress) => void
-): Stage {
+): Promise<Stage> {
   const start = performance.now();
   const commands: string[] = [];
   let stdout = '';
   let stderr = '';
   let exitCode = 0;
-  const run = (args: readonly string[]) => {
+  const run = async (args: readonly string[]) => {
     const command = serialize(args);
     commands.push(command);
-    const captured = module.run(command);
+    const isolated = await pipeline.run(id, args, files(module.fs), onProgress);
+    if (isolated) {
+      restore(module.fs, isolated.files);
+    }
+    const captured = isolated
+      ? {
+          value: isolated.stage.exitCode,
+          stdout: isolated.stage.stdout,
+          stderr: isolated.stage.stderr
+        }
+      : module.run(args);
     stdout += captured.stdout;
     stderr += captured.stderr;
     if (captured.value !== 0) {
@@ -194,7 +217,7 @@ function execute(
     }
   };
   for (const args of step.commands) {
-    run(args);
+    await run(args);
     if (exitCode !== 0) {
       break;
     }
@@ -215,7 +238,7 @@ function execute(
           phase: 'working',
           stage: `Rendering ${file.path.slice('/workspace/'.length)}`
         });
-        run(['dot', '-Tsvg', file.path, '-o', file.path + '.svg']);
+        await run(['dot', '-Tsvg', file.path, '-o', file.path + '.svg']);
       }
     }
   }

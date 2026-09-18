@@ -2,7 +2,7 @@ import type { IStateDB } from '@jupyterlab/statedb';
 
 import type { IPersistence } from '../persistence';
 
-const stateId = 'fortitudo:session';
+const stateId = 'wasmbolt:session';
 
 /** Protect recent edits while Jupyter's workspace persistence is deferred. */
 export function createPersistence(state: IStateDB, key: string): IPersistence {

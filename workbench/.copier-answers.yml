@@ -2,18 +2,17 @@
 _commit: v4.6.5
 _src_path: https://github.com/jupyterlab/extension-template
 advanced: true
-author_email: fortitudo@darian.at
-author_name: A. T. Darian
+author_email: andersonbhat491@gmail.com
+author_name: Anutosh Bhat
 create_claude_symlink: false
 create_gemini_symlink: false
 has_ai_rules: true
 has_binder: false
 has_settings: true
 kind: frontend
-labextension_name: fortitudo
+labextension_name: wasmbolt
 project_short_description: A JupyterLab extension.
-python_name: fortitudo
-repository: https://github.com/afshin/fortitudo
+python_name: wasmbolt
+repository: https://github.com/anutosh491/WasmBolt
 test: true
 yarn_linker: node-modules
-

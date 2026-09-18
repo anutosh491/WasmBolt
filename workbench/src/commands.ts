@@ -5,9 +5,16 @@ import type { IDisposable } from '@lumino/disposable';
 import { assemblyText } from './compiler/assembly';
 import type { IRunner } from './compiler/execution';
 import { isTimeout } from './compiler/execution';
+import { debugInvocation, serialize } from './compiler/request';
 import { command } from './compiler/terminal';
 import { isOptions, isOutputKind } from './compiler/types';
-import type { File, ICompiler, OutputKind, Progress } from './compiler/types';
+import type {
+  File,
+  ICompiler,
+  OutputKind,
+  Progress,
+  Stage
+} from './compiler/types';
 import { examples } from './examples';
 import type { IDebuggerClient } from './lldb/debugger';
 import { canRun, currentModule, hasComparison, snapshot, stale } from './model';
@@ -15,48 +22,50 @@ import type { Pane } from './model';
 import { session } from './persistence';
 import type { ISharing } from './share';
 import type { IStore } from './state';
-import { workspacePath } from './workspace';
+import { replaceFile, workspacePath } from './workspace';
 
 export namespace CommandIDs {
-  export const open = 'fortitudo:open';
-  export const initialize = 'fortitudo:initialize';
-  export const setSource = 'fortitudo:set-source';
-  export const setOptions = 'fortitudo:set-options';
-  export const compile = 'fortitudo:compile';
-  export const compileAndRun = 'fortitudo:compile-and-run';
-  export const cancel = 'fortitudo:cancel';
-  export const resetLayout = 'fortitudo:reset-layout';
-  export const saveLayout = 'fortitudo:save-layout';
-  export const navigate = 'fortitudo:navigate';
-  export const selectOutput = 'fortitudo:select-output';
-  export const compare = 'fortitudo:compare';
-  export const resetExample = 'fortitudo:reset-example';
-  export const createFile = 'fortitudo:create-file';
-  export const importFile = 'fortitudo:import-file';
-  export const selectFile = 'fortitudo:select-file';
-  export const showDebugger = 'fortitudo:show-debugger';
-  export const toggleBreakpoint = 'fortitudo:toggle-breakpoint';
-  export const startDebugging = 'fortitudo:start-debugging';
-  export const continueDebugging = 'fortitudo:continue-debugging';
-  export const pauseDebugging = 'fortitudo:pause-debugging';
-  export const stepOver = 'fortitudo:step-over';
-  export const stepIn = 'fortitudo:step-in';
-  export const stepOut = 'fortitudo:step-out';
-  export const restartDebugging = 'fortitudo:restart-debugging';
-  export const stopDebugging = 'fortitudo:stop-debugging';
-  export const selectDebugFrame = 'fortitudo:select-debug-frame';
-  export const debugCommand = 'fortitudo:debug-command';
-  export const runCommand = 'fortitudo:run-command';
-  export const clearTerminal = 'fortitudo:clear-terminal';
-  export const run = 'fortitudo:run';
-  export const stop = 'fortitudo:stop';
-  export const selectModule = 'fortitudo:select-module';
-  export const selectExport = 'fortitudo:select-export';
-  export const setArguments = 'fortitudo:set-arguments';
-  export const setTimeout = 'fortitudo:set-timeout';
-  export const share = 'fortitudo:share';
-  export const copy = 'fortitudo:copy';
-  export const download = 'fortitudo:download';
+  export const open = 'wasmbolt:open';
+  export const initialize = 'wasmbolt:initialize';
+  export const setSource = 'wasmbolt:set-source';
+  export const setOptions = 'wasmbolt:set-options';
+  export const compile = 'wasmbolt:compile';
+  export const compileAndRun = 'wasmbolt:compile-and-run';
+  export const cancel = 'wasmbolt:cancel';
+  export const resetLayout = 'wasmbolt:reset-layout';
+  export const saveLayout = 'wasmbolt:save-layout';
+  export const navigate = 'wasmbolt:navigate';
+  export const selectOutput = 'wasmbolt:select-output';
+  export const compare = 'wasmbolt:compare';
+  export const resetExample = 'wasmbolt:reset-example';
+  export const createFile = 'wasmbolt:create-file';
+  export const importFile = 'wasmbolt:import-file';
+  export const selectFile = 'wasmbolt:select-file';
+  export const showDiagnostics = 'wasmbolt:show-diagnostics';
+  export const showPipelines = 'wasmbolt:show-pipelines';
+  export const showDebugger = 'wasmbolt:show-debugger';
+  export const toggleBreakpoint = 'wasmbolt:toggle-breakpoint';
+  export const startDebugging = 'wasmbolt:start-debugging';
+  export const continueDebugging = 'wasmbolt:continue-debugging';
+  export const pauseDebugging = 'wasmbolt:pause-debugging';
+  export const stepOver = 'wasmbolt:step-over';
+  export const stepIn = 'wasmbolt:step-in';
+  export const stepOut = 'wasmbolt:step-out';
+  export const restartDebugging = 'wasmbolt:restart-debugging';
+  export const stopDebugging = 'wasmbolt:stop-debugging';
+  export const selectDebugFrame = 'wasmbolt:select-debug-frame';
+  export const debugCommand = 'wasmbolt:debug-command';
+  export const runCommand = 'wasmbolt:run-command';
+  export const clearTerminal = 'wasmbolt:clear-terminal';
+  export const run = 'wasmbolt:run';
+  export const stop = 'wasmbolt:stop';
+  export const selectModule = 'wasmbolt:select-module';
+  export const selectExport = 'wasmbolt:select-export';
+  export const setArguments = 'wasmbolt:set-arguments';
+  export const setTimeout = 'wasmbolt:set-timeout';
+  export const share = 'wasmbolt:share';
+  export const copy = 'wasmbolt:copy';
+  export const download = 'wasmbolt:download';
 }
 
 /** Explicit services and host actions used by the shared commands. */
@@ -88,6 +97,44 @@ export function registerCommands(
     disposables.add(commands.addCommand(id, options));
   const debugActive = () =>
     ['starting', 'running', 'stopped'].includes(store.state.debugger.status);
+
+  const runDebugCommand = async (text: string): Promise<void> => {
+    const value = text.trim();
+    store.dispatch({ type: 'debug-console', channel: 'input', text: value });
+    if (!value) {
+      const message = 'Usage: lldb <command>.';
+      store.dispatch({
+        type: 'debug-console',
+        channel: 'stderr',
+        text: message
+      });
+      store.dispatch({ type: 'debug-error', message });
+      return;
+    }
+    if (!debuggerClient || !debugActive()) {
+      const message = debuggerClient
+        ? 'Start debugging before running LLDB commands.'
+        : 'The LLDB-DAP debugger is not available in this build.';
+      store.dispatch({
+        type: 'debug-console',
+        channel: 'stderr',
+        text: message
+      });
+      store.dispatch({ type: 'debug-error', message });
+      return;
+    }
+    try {
+      await debuggerClient.command(value);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      store.dispatch({
+        type: 'debug-console',
+        channel: 'stderr',
+        text: message
+      });
+      store.dispatch({ type: 'debug-error', message });
+    }
+  };
 
   const unsubscribeDebugger = debuggerClient?.subscribe(event => {
     switch (event.type) {
@@ -264,6 +311,9 @@ export function registerCommands(
         path: workspacePath(args.name),
         data: args.data
       });
+      if (args.name.toLowerCase().endsWith('.wasm')) {
+        context.activatePane('run');
+      }
     }
   });
   add(CommandIDs.selectFile, {
@@ -276,11 +326,25 @@ export function registerCommands(
         throw new Error('The selected file is not in the workspace.');
       }
       store.dispatch({ type: 'file-select', path: args.path });
+      if (args.path.endsWith('.wasm')) {
+        runner.reset();
+        store.dispatch({ type: 'module', path: args.path });
+      }
     }
   });
   add(CommandIDs.showDebugger, {
     label: 'Open debugger',
+    isVisible: () => !!debuggerClient,
+    isEnabled: () => !!debuggerClient,
     execute: () => context.activatePane('debugger')
+  });
+  add(CommandIDs.showDiagnostics, {
+    label: 'Open diagnostics',
+    execute: () => context.activatePane('diagnostics')
+  });
+  add(CommandIDs.showPipelines, {
+    label: 'Open pipelines',
+    execute: () => context.activatePane('pipelines')
   });
   add(CommandIDs.toggleBreakpoint, {
     label: 'Toggle breakpoint',
@@ -312,7 +376,8 @@ export function registerCommands(
   });
   add(CommandIDs.startDebugging, {
     label: 'Start debugging',
-    isEnabled: () => !debugActive(),
+    isVisible: () => !!debuggerClient,
+    isEnabled: () => !!debuggerClient && idle() && !debugActive(),
     execute: async () => {
       if (!debuggerClient) {
         store.dispatch({
@@ -321,27 +386,163 @@ export function registerCommands(
         });
         return;
       }
-      const module =
-        store.state.execution.module ??
-        store.state.files.find(file => file.path.endsWith('.wasm'))?.path;
-      if (!module) {
-        store.dispatch({
-          type: 'debug-error',
-          message: 'Select a WebAssembly module in Explorer first.'
-        });
-        return;
-      }
       context.activatePane('debugger');
-      store.dispatch({ type: 'debug-status', status: 'starting', module });
+      let buildId: number | null = null;
       try {
+        const selected = store.state.selectedFile.endsWith('.wasm')
+          ? store.state.selectedFile
+          : null;
+        let module = selected;
+        let files = store.state.files;
+        if (selected) {
+          store.dispatch({ type: 'module', path: selected });
+        } else {
+          if (!currentModule(store.state)) {
+            await build(true, 'wasm');
+          }
+          if (!currentModule(store.state)) {
+            throw new Error(
+              'Build a runnable Wasm module before starting the debugger.'
+            );
+          }
+          const execution = store.state.execution;
+          const fn = execution.info?.functions.find(
+            fn => fn.name === execution.symbol && fn.callable
+          );
+          if (!fn) {
+            throw new Error(
+              execution.notice ||
+                'Choose the function and arguments in Execute first.'
+            );
+          }
+          buildId = ++sequence;
+          const id = buildId;
+          store.dispatch({ type: 'begin', id });
+          const progress = (progress: Progress) => {
+            if (!disposed) {
+              store.dispatch({ type: 'progress', id, progress });
+            }
+          };
+          const info = await compiler.initialize(progress);
+          store.dispatch({ type: 'initialized', id, info, compile: true });
+          const state = store.state;
+          const values = execution.args.map(value => {
+            return value.trim() ? Number(value) : NaN;
+          });
+          if (
+            fn.name !== 'main' &&
+            (values.length !== fn.params.length ||
+              values.some(
+                (value, index) =>
+                  !Number.isFinite(value) ||
+                  (fn.params[index] === 'i32' &&
+                    (!Number.isInteger(value) ||
+                      value < -2147483648 ||
+                      value > 2147483647))
+              ))
+          ) {
+            throw new Error(
+              'Enter valid arguments for the displayed Wasm signature.'
+            );
+          }
+          const hasMain = execution.info?.functions.some(
+            candidate => candidate.name === 'main'
+          );
+          const plan = debugInvocation(
+            {
+              id,
+              source: state.source,
+              sourcePath: state.activeFile,
+              files: state.files,
+              options: state.options
+            },
+            info,
+            '/workspace',
+            hasMain || fn.name === 'main'
+              ? null
+              : {
+                  symbol: fn.name,
+                  signature: {
+                    params: fn.params as ('i32' | 'f32' | 'f64')[],
+                    results: fn.results as ('i32' | 'f32' | 'f64')[]
+                  },
+                  args: values
+                }
+          );
+          const stages: Stage[] = [];
+          files = plan.wrapper
+            ? replaceFile(state.files, {
+                path: plan.wrapper.path,
+                data: new TextEncoder().encode(plan.wrapper.source)
+              })
+            : state.files;
+          for (const args of plan.commands) {
+            const result = await compiler.command(
+              { id, command: serialize(args), files },
+              progress
+            );
+            files = result.files;
+            stages.push(result.stage);
+            if (result.stage.exitCode !== 0) {
+              break;
+            }
+          }
+          files = files.filter(file => !plan.generated.includes(file.path));
+          const failed = stages.find(stage => stage.exitCode !== 0);
+          const stage: Stage = {
+            name: 'debug',
+            status: failed ? 'failed' : 'success',
+            commands: stages.flatMap(stage => stage.commands),
+            diagnostics: stages.flatMap(stage => stage.diagnostics),
+            stdout: stages
+              .map(stage => stage.stdout)
+              .filter(Boolean)
+              .join('\n'),
+            stderr: stages
+              .map(stage => stage.stderr)
+              .filter(Boolean)
+              .join('\n'),
+            exitCode: failed?.exitCode ?? 0,
+            duration: stages.reduce((total, stage) => {
+              return total + stage.duration;
+            }, 0)
+          };
+          store.dispatch({
+            type: 'command',
+            id,
+            result: { id, files, stage }
+          });
+          buildId = null;
+          if (failed) {
+            throw new Error(
+              failed.stderr || 'The standalone debug build failed.'
+            );
+          }
+          module = plan.module;
+        }
+        const execution = store.state.execution;
+        if (!module || !files.some(file => file.path === module)) {
+          throw new Error('Select or build a WebAssembly module first.');
+        }
+        const entry = selected ? execution.symbol : '';
+        const argv = selected && entry !== 'main' ? execution.args : [];
+        store.dispatch({ type: 'debug-status', status: 'starting', module });
         await debuggerClient.start({
           module,
-          files: store.state.files,
+          entry,
+          files,
           sourcePaths: store.state.editableFiles,
           breakpoints: store.state.debugger.breakpoints,
-          argv: []
+          argv
         });
       } catch (error) {
+        if (buildId !== null && store.state.active?.id === buildId) {
+          store.dispatch({
+            type: 'failed',
+            id: buildId,
+            message: String(error)
+          });
+        }
         store.dispatch({ type: 'debug-error', message: String(error) });
       }
     }
@@ -433,11 +634,7 @@ export function registerCommands(
       if (typeof args.command !== 'string' || !args.command.trim()) {
         throw new Error('An LLDB command is required.');
       }
-      try {
-        await debuggerClient?.command(args.command);
-      } catch (error) {
-        store.dispatch({ type: 'debug-error', message: String(error) });
-      }
+      await runDebugCommand(args.command);
     }
   });
   add(CommandIDs.resetLayout, {
@@ -458,7 +655,7 @@ export function registerCommands(
         store.dispatch({
           type: 'output',
           group: 'comparison',
-          output: mlir ? 'graphs' : 'optimized'
+          output: 'graphs'
         });
       }
       context.compare();
@@ -516,6 +713,15 @@ export function registerCommands(
       }
       if (typeof args.command !== 'string') {
         throw new Error('Command must be text.');
+      }
+      if (args.command.trim() === 'clear') {
+        store.dispatch({ type: 'clear-terminal' });
+        return;
+      }
+      const debugCommand = terminalDebugCommand(args.command);
+      if (debugCommand !== null) {
+        await runDebugCommand(debugCommand);
+        return;
       }
       try {
         command(args.command);
@@ -629,21 +835,21 @@ export function registerCommands(
         const fn = execution.info?.functions.find(
           fn => fn.name === execution.symbol
         );
-        if (!execution.module || !fn || fn.signatureCode === null) {
-          throw new Error(
-            execution.notice || 'Select a supported export in the Run pane.'
-          );
+        if (!execution.module || !fn || !fn.callable) {
+          throw new Error(execution.notice || 'Choose an export in Execute.');
         }
         const values =
-          fn.name === 'main' && fn.signatureCode === 2
+          fn.name === 'main' &&
+          fn.params.length === 2 &&
+          fn.params.every(type => type === 'i32')
             ? [0, 0]
             : execution.args.map(value => (value.trim() ? Number(value) : NaN));
         if (
           values.length !== fn.params.length ||
           values.some(
-            value =>
+            (value, index) =>
               !Number.isFinite(value) ||
-              (Number(fn.signatureCode) <= 2 &&
+              (fn.params[index] === 'i32' &&
                 (!Number.isInteger(value) ||
                   value < -2147483648 ||
                   value > 2147483647))
@@ -662,7 +868,10 @@ export function registerCommands(
             module: execution.module,
             files: state.files,
             symbol: fn.name,
-            signatureCode: fn.signatureCode,
+            signature: {
+              params: fn.params as ('i32' | 'f32' | 'f64')[],
+              results: fn.results as ('i32' | 'f32' | 'f64')[]
+            },
             args: values
           },
           state.timeout,
@@ -752,4 +961,10 @@ export function registerCommands(
       }
     }
   };
+}
+
+/** Strip the explicit terminal route while preserving ordinary tool names. */
+function terminalDebugCommand(text: string): string | null {
+  const value = text.trim();
+  return /^lldb(?:\s|$)/.test(value) ? value.slice('lldb'.length).trim() : null;
 }

@@ -28,6 +28,16 @@ export async function asset(
   return (await loadAssets(base, files, [name], onProgress))[0];
 }
 
+/** Load one optional runtime group as one verified operation. */
+export async function assetGroup(
+  base: string,
+  files: unknown,
+  names: readonly string[],
+  onProgress: (progress: Progress) => void
+): Promise<readonly ArrayBuffer[]> {
+  return loadAssets(base, files, names, onProgress);
+}
+
 async function loadAssets(
   base: string,
   files: unknown,
@@ -106,7 +116,9 @@ async function download(
   onProgress: (loaded: number) => void
 ): Promise<ArrayBuffer> {
   try {
-    const response = await fetch(new URL(entry.name, base), { signal });
+    const url = new URL(entry.name, base);
+    url.searchParams.set('sha256', entry.sha256);
+    const response = await fetch(url, { signal });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }

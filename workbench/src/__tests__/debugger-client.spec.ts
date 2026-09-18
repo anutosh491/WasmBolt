@@ -26,6 +26,7 @@ class FakeWorker implements IDebuggerWorker {
 
 const startRequest: DebugStartRequest = {
   module: '/workspace/program.wasm',
+  entry: 'main',
   files: [
     {
       path: '/workspace/program.wasm',

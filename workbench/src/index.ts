@@ -44,8 +44,6 @@ export type {
   DebugVariable,
   IDebuggerClient
 } from './lldb/debugger';
-export { createLldbStaticInspector } from './lldb/service';
-export type { ILldbStaticInspector } from './lldb/service';
 export { createMlirCompiler } from './mlir/service';
 export { currentModule, initial, reduce, snapshot, stale } from './model';
 export type {

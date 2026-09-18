@@ -1,4 +1,4 @@
-import type { RunRequest, RunResult } from './execution';
+import type { CallSignature, RunRequest, RunResult } from './execution';
 import type {
   CommandRequest,
   CommandResult,
@@ -82,6 +82,7 @@ export function isInput(value: unknown): value is Input {
   if (value.kind === 'command') {
     return typeof request.command === 'string';
   }
+  const signature = request.signature;
   return (
     value.kind === 'execute' &&
     typeof request.module === 'string' &&
@@ -89,19 +90,27 @@ export function isInput(value: unknown): value is Input {
     typeof request.symbol === 'string' &&
     request.symbol.length > 0 &&
     !request.symbol.includes('\0') &&
-    typeof request.signatureCode === 'number' &&
-    Number.isInteger(request.signatureCode) &&
-    request.signatureCode >= 0 &&
-    request.signatureCode <= 6 &&
+    isCallSignature(signature) &&
     Array.isArray(request.args) &&
-    request.args.length === [0, 1, 2, 0, 1, 2, 0][request.signatureCode] &&
+    request.args.length === signature.params.length &&
     request.args.every(
-      arg =>
+      (arg, index) =>
         typeof arg === 'number' &&
         Number.isFinite(arg) &&
-        (Number(request.signatureCode) > 2 ||
+        (signature.params[index] !== 'i32' ||
           (Number.isInteger(arg) && arg >= -2147483648 && arg <= 2147483647))
     )
+  );
+}
+
+function isCallSignature(value: unknown): value is CallSignature {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.params) &&
+    value.params.every(type => ['i32', 'f32', 'f64'].includes(String(type))) &&
+    Array.isArray(value.results) &&
+    value.results.length <= 1 &&
+    value.results.every(type => ['i32', 'f32', 'f64'].includes(String(type)))
   );
 }
 

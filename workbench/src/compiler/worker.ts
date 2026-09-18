@@ -1,6 +1,8 @@
 import { restore } from './files';
 import { initialize } from './module';
 import type { IModuleRuntime } from './module';
+import { createPipelineTools } from './pipeline';
+import type { IPipelineTools } from './pipeline';
 import { isInput } from './protocol';
 import type { Output } from './protocol';
 import type { Progress } from './types';
@@ -8,6 +10,7 @@ import { runtime } from './runtime';
 import { inspectWasm } from './wasm';
 
 let module: IModuleRuntime | null = null;
+let pipeline: IPipelineTools | null = null;
 let program: string | null = null;
 let pending: Promise<void> = Promise.resolve();
 
@@ -36,11 +39,16 @@ self.addEventListener('message', (event: MessageEvent<unknown>) => {
     try {
       if (input.kind === 'initialize') {
         module = await initialize(input.base, progress);
+        pipeline?.dispose();
+        pipeline = createPipelineTools(
+          new URL(input.base),
+          module.isolatedTools
+        );
         program = null;
         reply({ kind: 'ready', id: input.id, info: module.info });
         return;
       }
-      if (!module) {
+      if (!module || !pipeline) {
         throw new Error('The compiler is not initialized.');
       }
       if (input.kind === 'execute') {
@@ -53,8 +61,15 @@ self.addEventListener('message', (event: MessageEvent<unknown>) => {
           );
         if (
           !fn ||
-          fn.signatureCode === null ||
-          fn.signatureCode !== request.signatureCode
+          !fn.callable ||
+          fn.params.length !== request.signature.params.length ||
+          fn.results.length !== request.signature.results.length ||
+          fn.params.some(
+            (type, index) => type !== request.signature.params[index]
+          ) ||
+          fn.results.some(
+            (type, index) => type !== request.signature.results[index]
+          )
         ) {
           throw new Error(
             'The requested call does not match an exported signature.'
@@ -68,7 +83,7 @@ self.addEventListener('message', (event: MessageEvent<unknown>) => {
         const captured = module.call(
           request.module,
           request.symbol,
-          request.signatureCode,
+          request.signature,
           request.args
         );
         const value = captured.value;
@@ -84,18 +99,27 @@ self.addEventListener('message', (event: MessageEvent<unknown>) => {
               ? value
               : {
                   status: 'success',
-                  value: request.signatureCode === 6 ? null : value.value
+                  value:
+                    request.signature.results.length === 0 ? null : value.value
                 })
           }
         });
       } else if (input.kind === 'compile') {
-        const result = await runtime(module).compile(input.request, progress);
+        const result = await runtime(module, pipeline).compile(
+          input.request,
+          progress
+        );
         reply({ kind: 'result', id: input.id, result });
       } else {
-        const result = await runtime(module).command(input.request, progress);
+        const result = await runtime(module, pipeline).command(
+          input.request,
+          progress
+        );
         reply({ kind: 'command', id: input.id, result });
       }
     } catch (error) {
+      pipeline?.dispose();
+      pipeline = null;
       module = null;
       reply({
         kind: 'error',

@@ -1,0 +1,2 @@
+@EXPLICIT
+https://prefix.dev/emscripten-forge-4x/emscripten-wasm32/mlir-python-bindings-23.1.0-py313h1276dae_1.tar.bz2#885b2ca2c2ee761302d2c71650e4abdd8b3d0a0c4d0ed5e3be4d4889e55adcba

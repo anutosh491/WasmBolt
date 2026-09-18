@@ -5,6 +5,44 @@ import { defineConfig } from 'vite';
 const { version } = JSON.parse(
   readFileSync(new URL('./package.json', import.meta.url), 'utf8')
 );
+const isolationHeaders = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'require-corp',
+  'Cross-Origin-Resource-Policy': 'same-origin'
+};
+
+const serveCompiler = directory => (request, response, next) => {
+  const url = new URL(request.url, 'http://localhost');
+  const path = resolve(directory, `.${decodeURIComponent(url.pathname)}`);
+  if (!path.startsWith(directory + sep)) {
+    return next();
+  }
+  let file;
+  try {
+    file = statSync(path);
+    if (!file.isFile()) {
+      return next();
+    }
+  } catch {
+    return next();
+  }
+  const type = path.endsWith('.js')
+    ? 'text/javascript'
+    : path.endsWith('.json')
+      ? 'application/json'
+      : path.endsWith('.wasm')
+        ? 'application/wasm'
+        : path.endsWith('.tar.gz')
+          ? 'application/gzip'
+          : 'application/octet-stream';
+  response.setHeader('Content-Type', type);
+  response.setHeader('Content-Length', file.size);
+  response.setHeader('Cache-Control', 'no-cache');
+  for (const [name, value] of Object.entries(isolationHeaders)) {
+    response.setHeader(name, value);
+  }
+  createReadStream(path).pipe(response);
+};
 
 export default defineConfig(({ mode }) => {
   const output = mode === 'site' ? 'dist/site' : 'dist/standalone';
@@ -14,6 +52,11 @@ export default defineConfig(({ mode }) => {
     publicDir: mode === 'site' ? 'public' : false,
     define: {
       'import.meta.env.WASMBOLT_VERSION': JSON.stringify(version)
+    },
+    server: { headers: isolationHeaders },
+    preview: {
+      headers: isolationHeaders,
+      allowedHosts: ['.serveousercontent.com']
     },
     build: {
       target: 'es2022',
@@ -63,32 +106,11 @@ export default defineConfig(({ mode }) => {
         },
         configureServer(server) {
           const directory = resolve('compiler');
-          server.middlewares.use('/compiler', (request, response, next) => {
-            const url = new URL(request.url, 'http://localhost');
-            const path = resolve(
-              directory,
-              `.${decodeURIComponent(url.pathname)}`
-            );
-            if (!path.startsWith(directory + sep)) {
-              return next();
-            }
-            try {
-              if (!statSync(path).isFile()) {
-                return next();
-              }
-            } catch {
-              return next();
-            }
-            const type = path.endsWith('.js')
-              ? 'text/javascript'
-              : path.endsWith('.json')
-                ? 'application/json'
-                : path.endsWith('.wasm')
-                  ? 'application/wasm'
-                  : 'application/octet-stream';
-            response.setHeader('Content-Type', type);
-            createReadStream(path).pipe(response);
-          });
+          server.middlewares.use('/compiler', serveCompiler(directory));
+        },
+        configurePreviewServer(server) {
+          const directory = resolve(output, 'compiler');
+          server.middlewares.use('/compiler', serveCompiler(directory));
         },
         closeBundle() {
           cpSync(resolve('compiler'), resolve(output, 'compiler'), {

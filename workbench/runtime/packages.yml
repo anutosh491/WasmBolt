@@ -1,0 +1,7 @@
+name: wasmbolt-wasm-packages
+
+channels:
+  - https://prefix.dev/emscripten-forge-4x
+
+dependencies:
+  - xtensor =0.27.1 =h0b0027f_0

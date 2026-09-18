@@ -79,6 +79,8 @@ function isStartRequest(value: unknown): value is DebugStartRequest {
     !isRecord(value) ||
     !isWorkspacePath(value.module) ||
     !value.module.endsWith('.wasm') ||
+    typeof value.entry !== 'string' ||
+    value.entry.includes('\0') ||
     !isFiles(value.files) ||
     !value.files.some(file => file.path === value.module) ||
     !Array.isArray(value.sourcePaths) ||

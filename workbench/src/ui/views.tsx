@@ -28,6 +28,9 @@ interface IControlsProps {
   onGuide(): void;
   onImportFile(name: string, data: Uint8Array): void;
   onShowDebugger(): void;
+  onShowDiagnostics(): void;
+  onShowPipelines(): void;
+  debuggerAvailable: boolean;
 }
 
 export function Controls(props: IControlsProps): React.ReactElement {
@@ -38,6 +41,11 @@ export function Controls(props: IControlsProps): React.ReactElement {
   const loaded = downloads?.reduce((sum, item) => sum + item.loaded, 0) ?? 0;
   const total = downloads?.reduce((sum, item) => sum + item.total, 0) ?? 0;
   const wasm = useRef<HTMLInputElement>(null);
+  const more = useRef<HTMLDetailsElement>(null);
+  const advanced = (action: () => void) => {
+    more.current?.removeAttribute('open');
+    action();
+  };
   return (
     <div className="wasmbolt-controls">
       <div className="wasmbolt-toolbar">
@@ -132,13 +140,15 @@ export function Controls(props: IControlsProps): React.ReactElement {
             Compile and Run
           </button>
           {busy && <button onClick={props.onCancel}>Cancel</button>}
-          <button
-            aria-label="Open debugger"
-            title="Open debugger"
-            onClick={props.onShowDebugger}
-          >
-            🐞
-          </button>
+          {props.debuggerAvailable && (
+            <button
+              aria-label="Open debugger"
+              title="Open debugger"
+              onClick={props.onShowDebugger}
+            >
+              🐞
+            </button>
+          )}
           <button onClick={() => wasm.current?.click()}>Load Wasm</button>
           <input
             ref={wasm}
@@ -156,6 +166,31 @@ export function Controls(props: IControlsProps): React.ReactElement {
               }
             }}
           />
+          <details className="wasmbolt-more" ref={more}>
+            <summary aria-label="More actions" title="More actions">
+              …
+            </summary>
+            <div className="wasmbolt-more-menu">
+              <button onClick={() => advanced(props.onShowDiagnostics)}>
+                Diagnostics
+              </button>
+              <button onClick={() => advanced(props.onShowPipelines)}>
+                Pipelines
+              </button>
+              <button onClick={() => advanced(props.onCompare)}>
+                Compare outputs
+              </button>
+              <button onClick={() => advanced(props.onGuide)}>Guide</button>
+              <button onClick={() => advanced(props.onResetLayout)}>
+                Reset layout
+              </button>
+              {props.onShare && (
+                <button onClick={() => advanced(() => props.onShare?.())}>
+                  Copy share link
+                </button>
+              )}
+            </div>
+          </details>
         </div>
       </div>
       <div className="wasmbolt-status">

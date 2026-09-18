@@ -1,7 +1,7 @@
 # WasmBolt: latest product and runtime design
 
 This document is the design checkpoint for WasmBolt after the compiler,
-utility-tool, Clangd, MLIR, LLDB, WAMR, Jupyter, and Fortitudo experiments.
+utility-tool, Clangd, MLIR, LLDB, WAMR, and Jupyter experiments.
 It records both the intended product and the boundaries that the experiments
 showed we must preserve.
 
@@ -36,31 +36,80 @@ The default layout follows a minimal VS Code-style workbench:
 
 - The Explorer owns a real, canonical workspace. Selecting a file opens it;
   users can create and import text or binary files.
-- Starter files cover C, C++, LLVM IR, MLIR, and a real `xtensor` example.
-- The editor uses a standard dark VS Code-like theme. Clangd completions appear
-  beside the cursor as the user types; there is no separate results box and no
-  required keyboard shortcut.
-- The right group contains only relevant output tabs, such as AST, MLIR,
-  LLVM IR, optimized IR, analysis, CFG, assembly, object, Wasm module, and
-  debugger views. Tabs are not a row of large square buttons.
+- Starter files cover C, C++, LLVM IR, MLIR, and WasmBolt's own
+  `xtensor.cpp` example. The example is not copied from xtensor.
+- The editor uses a standard dark VS Code-like theme. Source-built Clangd
+  provides completions beside the cursor as the user types; there is no
+  separate results box and no required keyboard shortcut.
+- The right group contains only contextual output tabs: AST, LLVM IR,
+  Graphviz, assembly, and Wasm module for C/C++; MLIR, LLVM IR, and Graphviz
+  for MLIR; and debugger views when the debugger runtime is available. Tabs
+  are not a row of large square buttons.
+- The Wasm module view renders genuine WAT in a lazy disposable WABT Worker;
+  WABT is not part of the main application bundle.
 - Compile builds the active output and only the prerequisite stages needed for
   it. It does not eagerly execute every possible pipeline stage.
-- Compile and Run builds a runnable Wasm program and executes it. Run reuses the
-  selected, unchanged Wasm module. Editing function arguments never recompiles.
+- Compile and Run builds a runnable Wasm program and executes it. Run function
+  reuses the selected, unchanged Wasm module. Editing function arguments never
+  recompiles.
 - Load Wasm selects an existing or imported module without rebuilding source.
 - One bottom terminal records commands and their output. Prompts, commands,
   stdout, stderr, exit status, and the current prompt are visually distinct.
   It behaves like a terminal, including a working `clear` command.
-- A bug button opens the debugger UI and breakpoint gutter. Live debugging has
-  Continue, Pause, Step Over, Step In, Step Out, Restart, and Stop, together
-  with call stack and variables. Static LLDB inspection is not presented as
-  live debugging.
-- Heavy assets begin warming after page load. The UI reports honest progress
-  and remains interactive. Optional language and debugger runtimes stay lazy.
+- A bug button opens the debugger UI and breakpoint gutter. The intended live
+  controls are Continue, Pause, Step Over, Step In, Step Out, Restart, and Stop,
+  together with call stack and variables. They are enabled only when the
+  LLDB-DAP runtime is present and validated.
+- The core compiler begins warming after page load. The UI reports honest
+  progress and remains interactive. Optional language, pipeline, utility,
+  runner, and debugger runtimes stay lazy.
 
 The browser path shown to users is `wasmbolt:/workspace`; `/workspace` remains
 the runtime working directory. The sandbox does not need to be disguised, but
 users should not have to manage implementation-specific mount points.
+
+## Verified implementation checkpoint
+
+The recovered workbench currently has these verified product boundaries:
+
+- the standalone and Jupyter hosts eagerly initialize one persistent core
+  compiler Worker;
+- every compile request identifies the exact active source and sends the full
+  canonical workspace snapshot;
+- a new workspace contains `snippet.c`, `snippet.cpp`, `input.ll`,
+  `input.mlir`, and WasmBolt's custom `xtensor.cpp` example;
+- `xtensor` 0.27.1 and `xtl` 0.8.2, both build `h0b0027f_0`, are pinned from
+  emscripten-forge, delivered as separate empack archives, restored at `/`,
+  and verified by compiling the example in a real browser;
+- the default C/C++ Wasm build compiles directly to an object in the persistent
+  compiler Worker, then links it with the in-process `wasm-ld`;
+- `opt` and `llc` are reserved for requested IR, graph, assembly, object, and
+  custom-pipeline exploration in isolated tool Workers;
+- LLVM utilities, `mlir-opt`, and `mlir-translate` also use isolated tool
+  Workers rather than sharing the persistent compiler runtime;
+- the real MLIR command-line modules have completed the browser lowering path
+  from MLIR through `mlir-opt` and `mlir-translate` to LLVM IR;
+- generated MLIR assets remain ignored build products, while the
+  `native/mlir` recipe builds the full upstream argv drivers;
+- the Wasm module view renders genuine WAT through a verified, lazy disposable
+  WABT Worker;
+- the runner infers numeric export signatures from the Wasm type section and
+  reuses an unchanged loaded module when only call arguments change; and
+- the staged LLDB-DAP/WAMR runtime has completed a real workbench debug flow:
+  breakpoint at `simple.cpp:2`, inspect `value = 6` and `squared = 0`, Step
+  Over to `squared = 36`, then Continue to exit 37 without errors.
+
+One local Chrome smoke measured a repeated call with changed arguments at
+about 62 ms. That is an experimental observation, not a release benchmark.
+
+The staged Clangd is a source build of LLVM 23.1.0 at revision
+`ea7d852a70e8bdfaf601d6626a760f9771b2c4b4`, compiled with Emscripten 4.0.9.
+Two real browser smoke passes each returned 43 `std::vector` member
+completions, published zero-error diagnostics for a constexpr-heavy document,
+and completed another request after an idle period and document edit. The
+cold pass reported 7.894 s in-page and 7.962 s wall time. A reload that created
+a fresh Worker reported 4.684 s in-page and 4.750 s wall time. Both ran with
+`crossOriginIsolated === true`.
 
 ## Canonical workspace
 
@@ -84,8 +133,7 @@ force the application into a notebook-style UI.
 WasmBolt workbench and canonical workspace
 |
 +-- persistent compiler Worker
-|   `-- ToolSession
-|       `-- Clang driver -> integrated cc1 -> registered wasm-ld
+|   `-- Clang frontend and explicit in-process wasm-ld command
 |
 +-- disposable LLVM pipeline Workers
 |   |-- opt
@@ -93,19 +141,19 @@ WasmBolt workbench and canonical workspace
 |
 +-- lazy disposable LLVM utility Worker
 |   `-- LLVM multicall driver: readobj, nm, size, cxxfilt, ar,
-|       objdump, objcopy, strip, ...
+|       objdump, and objcopy
 |
 +-- lazy disposable MLIR Worker
-|   `-- real mlir-opt and mlir-translate driver entry points
+|   `-- real mlir-opt and mlir-translate programs
 |
 +-- persistent-on-demand Clangd Worker
-|   `-- LSP over typed Worker messages
+|   `-- source-built clangd 23.1.0; LSP over typed Worker messages
 |
 +-- lazy debugger Worker
-|   `-- lldb-dap -> liblldb/ProcessWasm -> in-memory transport -> WAMR
+|   `-- lldb-dap -> liblldb/ProcessWasm -> transport -> WAMR
 |
-`-- disposable runner Worker
-    `-- selected program.wasm
+`-- lazy isolated runner Worker
+    `-- selected and cached program.wasm
 ```
 
 Workers are an isolation boundary, not merely a responsiveness optimization.
@@ -116,7 +164,30 @@ the canonical workspace into a fresh one.
 ### Compiler Worker and ToolSession
 
 The compiler Worker is long lived and serialized. It is the strong same-process
-use case:
+boundary used by the current fast Wasm build:
+
+```text
+clang++ -O2 -fPIC -fvisibility=default -c source.cpp -o output.o
+wasm-ld -shared --unresolved-symbols=import-dynamic output.o \
+  -o program.wasm
+dlopen(program.wasm) -> dlsym(export) -> call
+```
+
+Clang performs its ordinary frontend, optimization, and code-generation path.
+The build does not start `opt` or `llc` Workers. `-shared` produces the dynamic
+Wasm module expected by the current `dlopen` runner.
+`--unresolved-symbols=import-dynamic` retains unresolved symbols as dynamic
+imports for that model. `--export-dynamic` was redundant with `-shared` and has
+been removed.
+
+A local browser benchmark compared that path with the former exploratory
+`clang -> opt -> llc -> wasm-ld` chain. The legacy chain took 2,064 ms cold and
+had a 2,410 ms warm median. The direct path took 704 ms cold and had a 25.5 ms
+warm median. Both exposed the same signature and returned 24 for the same call.
+These are local experimental measurements, not release guarantees.
+
+The intended upstream-dependent form collapses the two build commands into the
+natural driver invocation:
 
 ```text
 clang++ add.cpp main.cpp -o program.wasm
@@ -128,6 +199,11 @@ clang++ add.cpp main.cpp -o program.wasm
 LLVM's `ToolSession` owns process initialization and provides explicit nested
 tool dispatch. It does not make every LLVM tool reentrant, isolate global
 options, or turn a command into a daemon by itself.
+
+The current packaged `CompilerModule.cpp` invokes Clang and `wasm-ld` as two
+commands in the same persistent Worker. The one-command
+`clang++ add.cpp main.cpp -o program.wasm` form remains gated on the pending
+Clang `ToolSession` dispatch patch and a compiler package containing it.
 
 The compiler host must therefore enforce these rules:
 
@@ -147,14 +223,15 @@ one Wasm instance.
 
 ### opt and llc
 
-The UI may present opt and llc as one compiler pipeline, but their runtime
-boundary remains independent while process-global command-line registrations
-make repeated co-hosting unsafe. Each invocation uses the genuine upstream
-driver entry point with the full argv and a disposable Worker/runtime.
+`opt` and `llc` serve explicit compiler exploration: custom LLVM passes,
+Graphviz, assembly, object inspection, and direct terminal commands. They are
+not prerequisites of the default C/C++ Compile and Run path.
 
-Startup time, decoded bytes, peak memory, and workspace-transfer cost must be
-measured before changing this boundary. If LLVM later provides explicit option
-state, these tools can move behind the same session without changing the UI.
+Their runtime boundary remains independent while process-global command-line
+registrations make repeated co-hosting unsafe. Each invocation uses the genuine
+upstream driver entry point with the full argv and a disposable Worker/runtime.
+If LLVM later provides explicit option state, these tools can move behind the
+same session without changing the UI.
 
 ### LLVM utility tools
 
@@ -164,10 +241,11 @@ and invokes the requested tool once. This preserves the normal executable
 boundary and avoids claiming a repeated-invocation contract that the tool does
 not provide.
 
-Initial tools are `llvm-readobj`, `llvm-nm`, `llvm-size`, `llvm-cxxfilt`,
-`llvm-ar`, `llvm-objdump`, `llvm-objcopy`, and `llvm-strip`. The Worker requires
-a JavaScript loader and Wasm module; a static archive alone cannot be
-instantiated by a browser Worker.
+The initial mapped tools are `llvm-readobj`, `llvm-nm`, `llvm-size`,
+`llvm-cxxfilt`, `llvm-ar`, `llvm-objdump`, and `llvm-objcopy`. The Worker
+requires a JavaScript loader and Wasm module; a static archive alone cannot be
+instantiated by a browser Worker. Other multicall tools are added only after
+their command mapping and browser behavior are tested.
 
 ### MLIR
 
@@ -180,14 +258,33 @@ match the compiler assets it exchanges IR with. Lowering to LLVM IR is the first
 supported execution path; SPIR-V/WebGPU is a later backend, not a shortcut in
 the initial runtime.
 
+This boundary is browser-proven with source-built `mlir-opt` and
+`mlir-translate` modules from one LLVM revision. The service forwards their
+complete argument vectors to the real command-line programs. There is no
+WasmBolt parser for `-o`, `--pass-pipeline`, or `--mlir-to-llvmir`. The
+`native/mlir` recipe builds these upstream argv drivers reproducibly. Its
+generated JavaScript and Wasm assets remain ignored build products rather than
+source-controlled binaries.
+
 ### Clangd
 
-Clangd is a genuine `clangd.js`/`clangd.wasm` service, not a completion demo or
-hard-coded keyword list. It starts automatically when a C/C++ editor needs it,
-stays alive for the editing session, receives workspace changes through LSP,
-and can be suspended or restarted under memory pressure. A power-user setting
-may disable language services, but the primary UI does not need an Enable
-Clangd button.
+Clangd is designed as a genuine `clangd.js`/`clangd.wasm` service, not a
+completion demo or hard-coded keyword list. It starts when a C/C++ editor needs
+it, stays alive for the editing session, receives workspace changes through
+LSP, and can be suspended or restarted under memory pressure. The client
+lifecycle, including suspension that terminates the Worker, has unit coverage.
+The staged runtime is built from LLVM 23.1.0 revision
+`ea7d852a70e8bdfaf601d6626a760f9771b2c4b4` with Emscripten 4.0.9. Its
+reproducible recipe and patches live in `native/clangd`; generated runtime
+assets remain ignored build products.
+
+Two browser smoke passes verified real LSP diagnostics and completion. Each
+returned 43 members for `std::vector`, reported no error diagnostics for the
+constexpr stress document, and completed again after an idle period and edit.
+The cold pass took 7.894 s in-page and 7.962 s wall time. A reload with a fresh
+Worker took 4.684 s in-page and 4.750 s wall time. Both pages were
+cross-origin-isolated. These are local observations rather than release
+performance guarantees.
 
 The compiler flags sent to Clangd must match the selected target, language,
 resource directory, sysroot, and package mounts used by compilation.
@@ -204,14 +301,27 @@ string, aggregate, and host-object marshalling require explicit adapters rather
 than unsafe guesses. Repeated calls reuse module state until Reset, Stop,
 timeout, trap, or module replacement retires the runner.
 
+An already-current module is reused by **Run function**. Changing call
+arguments does not change the workspace revision, reload the module, or invoke
+the compiler. **Compile and Run** builds a Wasm module first when none is
+current.
+
 ### LLDB, LLDB-DAP, ProcessWasm, and WAMR
 
-The debug target is the final debug-enabled `program.wasm`. Source locations
-come from DWARF in that module and paths in the canonical workspace. Users may
-choose their own optimization and debug flags; the UI can explain why `-O0 -g`
-is useful but must not silently rewrite their program.
+The ordinary `program.wasm` is a shared module optimized for fast interactive
+execution. WAMR requires a standalone program, so source debugging builds a
+separate `debug.wasm` with `-O0 -g3`. Its startup object and system archives
+come from a lazy debug-sysroot asset group matching the compiler package's
+Emscripten 4.0.9 ABI.
 
-The live path is:
+An existing source `main` is the program entry. For function-only examples,
+WasmBolt decodes the selected export's signature from the ordinary module and
+generates a temporary `main` that calls the real symbol with the current
+Execute arguments. This keeps the adapter generic: application signatures are
+never hardcoded. Temporary wrapper and object files are removed from the
+visible workspace after linking.
+
+The verified live path is:
 
 ```text
 breakpoint gutter and debugger controls
@@ -220,7 +330,7 @@ breakpoint gutter and debugger controls
   -> LLDB SB/API and ProcessWasm
   -> in-memory GDB-remote transport
   -> WAMR interpreter
-  -> program.wasm
+  -> debug.wasm
 ```
 
 WAMR is the execution engine: it interprets the guest Wasm instructions and
@@ -232,22 +342,36 @@ The in-memory transport replaces sockets inside one Worker but keeps the
 protocol boundary. It must preserve packet framing, errors, cancellation, and
 state transitions; it is not an ad-hoc byte callback.
 
-Each live debug session gets a replaceable debugger Worker. The Worker buffers
-early `stopped` events until configuration finishes. The UI publishes a paused
-state as soon as the stop event and stack are known; variables/scopes are
-loaded separately so a slow variable query cannot hide a valid breakpoint hit.
-Repeated start/stop/restart sessions and failure recovery are mandatory tests.
+Each live debug session gets a replaceable debugger Worker. The Worker must
+buffer early `stopped` events until configuration finishes. The UI should
+publish a paused state once the stop event and stack are known, then load
+variables separately so a slow variable query cannot hide a valid breakpoint
+hit. The staged runtime and real workbench UI have passed this browser flow:
 
-The validated simple flow is breakpoint -> variables -> Step Over -> variables
--> Continue, with `value = 6`, `squared = 0`, then `squared = 36`, then exit 37.
-The validated xtensor flow uses an ordinary `main`, stops in both `main` and
-`xtensor_broadcast_sum`, observes `scale = 2` and `total = 141`, and exits 282
-modulo the process-status width. The previous prototype exposed an intermittent
-hang during automatic scopes/variables handling; that is an open reliability
-issue, not a completed product claim.
+```text
+breakpoint simple.cpp:2
+  -> value = 6, squared = 0
+  -> Step Over
+  -> squared = 36
+  -> Continue
+  -> exit 37
+```
 
-Static LLDB inspection and the LLDB command interpreter may be exposed in the
-terminal, but the debugger tab must use LLDB-DAP for live state and controls.
+The flow completed without UI or protocol errors. Both F9 and the editor gutter
+toggle source breakpoints. The same product path also stopped in the default
+function-only example and an empack-backed xtensor example, showing variables
+and the generated `main` in the call stack. After stepping, a Terminal
+`lldb frame variable` command observed the same frame state as the Debugger
+panel. Repeated-session soak, restart, every step variant, and failure recovery
+remain release gates. The debugger assets are reproducibly built by the
+`native/debugger` source recipe.
+
+The old independent static `lldb.js`/`lldb.wasm` inspection runtime has been
+removed from the product architecture. The debugger module embeds `lldb-dap`,
+`liblldb`, ProcessWasm, and WAMR. Terminal commands beginning with `lldb` use
+DAP `evaluate` against that same session, so the terminal and debugger cannot
+silently observe different LLDB states. A separate static runtime should return
+only if measurements establish a concrete need for it.
 
 ## Packages and deployment assets
 
@@ -256,6 +380,12 @@ are emitted beside the application, cached by the browser, and mounted lazily
 into Workers. Headers such as xtensor must not be manually copied into
 `Compiler.data`; selecting xtensor in the environment makes its archive and
 metadata available to the compiler and Clangd mounts.
+
+The current package set pins `xtensor` 0.27.1 and `xtl` 0.8.2 with build
+`h0b0027f_0`. They are separate empack archives restored at `/`, not files baked
+into `Compiler.data`. The starter `xtensor.cpp` is a small WasmBolt-authored
+broadcast and reduction example used to verify in a real browser that these
+mounted headers participate in an ordinary C++ compile.
 
 Each runtime asset has a manifest entry with:
 
@@ -269,15 +399,29 @@ Each runtime asset has a manifest entry with:
 The application refuses mismatched or placeholder assets. Missing optional
 assets disable the corresponding capability with an honest message.
 
-The current compiler package uses Emscripten 4.0.9, while the successful LLDB
-prototype used 6.0.8. Separate Workers avoid a direct linked ABI between those
-modules, but the production goal is one tested Emscripten 6.x toolchain once the
-remaining emscripten-forge recipes are ready.
+The compiler package and debug guest sysroot use Emscripten 4.0.9. The staged
+debugger host is a separate Emscripten 6.0.8 pthread runtime produced by the
+`native/debugger` source recipe. The modules exchange DAP and GDB-remote bytes,
+not linked C++ objects, so their Emscripten versions do not form a shared ABI.
+Moving every source recipe to one tested toolchain remains desirable, but is
+not a prerequisite for this isolated design.
 
 The public build should include WebAssembly plus the native inspection backends
 it advertises (AArch64 and x86-64 in the present design). If size forces a
 reduced build, unavailable targets are removed from the UI rather than allowed
 to fail at llc time.
+
+Clangd and LLDB-DAP/WAMR are pthread services. Their deployment requires
+cross-origin isolation, including these response headers on HTML, JavaScript,
+Wasm, package archives, and nested Worker scripts:
+
+```text
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
+```
+
+If `crossOriginIsolated` is unavailable, ordinary compilation may continue,
+but threaded services must remain disabled with an explicit explanation.
 
 ## Future compilers
 
@@ -298,8 +442,10 @@ A public deployment is ready only when it passes:
 - WebAssembly compile, load, repeat-run-with-new-arguments, and reset;
 - AArch64 and x86-64 assembly/object generation when advertised;
 - automatic Clangd completion with the same flags and packages as compilation;
-- debugger tests on the simple program first, then xtensor, including repeated
-  sessions, restart, stepping, variables, and Worker replacement;
+- the verified simple, function-only, and xtensor LLDB-DAP flows on every
+  release build;
+- debugger tests for repeated sessions, restart, all step variants, failure
+  recovery, and Worker replacement;
 - measurements for cold/warm download, Worker startup, execution time, memory,
   and workspace transfer.
 
@@ -310,11 +456,11 @@ manually fabricated output may satisfy these gates.
 
 - [LLVM #221996](https://github.com/llvm/llvm-project/pull/221996), merged:
   `ToolSession` ownership and nested tool invocation.
-- [LLVM #222531](https://github.com/llvm/llvm-project/pull/222531): multiple
-  integrated cc1 jobs in a session, including removal of `-disable-free` for
-  session-owned jobs.
-- The follow-up linker-dispatch patch registers a linker explicitly and keeps
-  native subprocess behavior as the default.
+- [LLVM #222531](https://github.com/llvm/llvm-project/pull/222531): proposed
+  multiple integrated cc1 jobs in a session, including removal of
+  `-disable-free` for session-owned jobs.
+- The proposed follow-up linker-dispatch patch registers a linker explicitly
+  and keeps native subprocess behavior as the default.
 - [LLVM #223169](https://github.com/llvm/llvm-project/pull/223169), merged:
   `HostInfoEmscripten`.
 - [LLVM #223200](https://github.com/llvm/llvm-project/pull/223200), merged:
@@ -327,15 +473,14 @@ manually fabricated output may satisfy these gates.
 - LLVM's multicall driver is the preferred first boundary for standalone
   binary utilities; separate exported utility-driver libraries are not assumed.
 
-## Current recovery status
+## Current implementation status
 
-The source architecture and UI are being reconstructed in persistent Git
-worktrees. The prior `/private/tmp` LLDB-DAP/WAMR binaries were lost in a laptop
-restart. Their exact successful link settings and validated behavior are known,
-but the native assets must be rebuilt and the intermittent variables-request
-hang must be reproduced before the live debugger can be called production
-ready.
+The source architecture and UI are reconstructed in a persistent Git worktree.
+MLIR, empack packages, WAT rendering, and simple, function-only, and xtensor
+LLDB-DAP/WAMR debug flows are browser-verified. Source-built Clangd completion
+and diagnostics are also browser-verified, including a fresh-Worker restart.
+The debugger assets are staged from the reproducible `native/debugger` source
+recipe; there is no independent `lldb.js`/`lldb.wasm` runtime.
 
 This document is the source of truth when an experiment and the intended
 product disagree.
-

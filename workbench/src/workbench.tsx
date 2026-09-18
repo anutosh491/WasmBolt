@@ -7,10 +7,17 @@ import * as React from 'react';
 import { createClangd } from './clangd/client';
 import type { IClangdClient } from './clangd/types';
 import { CommandIDs, registerCommands } from './commands';
+import {
+  loadCapabilities,
+  threadedRuntimeSupport
+} from './compiler/capabilities';
+import type { Capabilities } from './compiler/capabilities';
 import { createRunner } from './compiler/runner';
 import type { IRunner } from './compiler/execution';
 import { createCompiler } from './compiler/client';
 import type { ICompiler, OutputKind } from './compiler/types';
+import { createWatRenderer } from './compiler/wat';
+import type { IWatRenderer } from './compiler/wat';
 import { createDebugger } from './lldb/client';
 import type { IDebuggerClient } from './lldb/debugger';
 import { initial, snapshot } from './model';
@@ -33,6 +40,7 @@ export interface IWorkbenchOptions {
   sharing?: ISharing;
   clangd?: IClangdClient;
   debugger?: IDebuggerClient;
+  wat?: IWatRenderer;
   preloadCompiler?: boolean;
 }
 
@@ -40,6 +48,16 @@ export interface IWorkbenchOptions {
 export async function createWorkbench(
   options: IWorkbenchOptions
 ): Promise<Workbench> {
+  const needsCapabilities =
+    options.clangd === undefined || options.debugger === undefined;
+  const detected = needsCapabilities
+    ? await loadCapabilities(options.workerUrl)
+    : { clangd: false, debugger: false };
+  const threads = threadedRuntimeSupport();
+  const capabilities: Capabilities = {
+    clangd: options.clangd !== undefined || (threads && detected.clangd),
+    debugger: options.debugger !== undefined || (threads && detected.debugger)
+  };
   let saved = options.defaults ?? null;
   let notice: string | null = null;
   try {
@@ -64,14 +82,15 @@ export async function createWorkbench(
   if (notice) {
     store.dispatch({ type: 'notice', message: notice });
   }
-  return new Workbench(options, store);
+  return new Workbench(options, store, capabilities);
 }
 
 /** Own the complete session and release its resources when closed. */
 export class Workbench extends BoxPanel {
   constructor(
     private readonly options: IWorkbenchOptions,
-    private readonly store: IStore
+    private readonly store: IStore,
+    private readonly capabilities: Capabilities
   ) {
     super({ direction: 'top-to-bottom', spacing: 0 });
     this.id = 'wasmbolt-workbench';
@@ -82,18 +101,24 @@ export class Workbench extends BoxPanel {
     this.compiler = createCompiler(options.workerUrl);
     this.runner = createRunner(options.workerUrl);
     const assetBase = new URL('.', options.workerUrl);
+    this.wat =
+      options.wat ?? createWatRenderer(new URL('wat-worker.js', assetBase));
     this.clangd =
       options.clangd ??
-      createClangd({
-        workerUrl: new URL('clangd-worker.js', assetBase),
-        assetBase: new URL('clangd/', assetBase)
-      });
+      (capabilities.clangd
+        ? createClangd({
+            workerUrl: new URL('clangd-worker.js', assetBase),
+            assetBase: new URL('clangd/', assetBase)
+          })
+        : null);
     this.debugger =
       options.debugger ??
-      createDebugger({
-        workerUrl: new URL('debug-worker.js', assetBase),
-        assetBase: new URL('lldb-dap/', assetBase)
-      });
+      (capabilities.debugger
+        ? createDebugger({
+            workerUrl: new URL('debug-worker.js', assetBase),
+            assetBase: new URL('lldb-dap/', assetBase)
+          })
+        : null);
     const header = this.view('controls');
     header.addClass('wasmbolt-header');
     this.addWidget(header);
@@ -109,20 +134,25 @@ export class Workbench extends BoxPanel {
       diagnostics: this.view('diagnostics'),
       terminal: this.view('terminal'),
       run: this.view('run'),
-      debugger: this.view('debugger'),
       pipelines: this.view('pipelines')
     };
+    const debuggerPane = this.debugger ? this.view('debugger') : null;
     panes.explorer.title.label = 'Explorer';
     panes.source.title.label = 'Source';
     panes.outputs.title.label = 'Outputs';
     panes.comparison.title.label = 'Comparison';
     panes.terminal.title.label = 'Terminal';
-    panes.run.title.label = 'Run';
-    panes.debugger.title.label = 'Debugger';
+    panes.run.title.label = 'Execute';
+    if (debuggerPane) {
+      debuggerPane.title.label = 'Debugger';
+    }
     panes.pipelines.title.label = 'Pipelines';
     panes.diagnostics.title.label = 'Diagnostics';
-    this.panels = new PanePanel(panes, store.state.layout, () =>
-      this.layoutChanged()
+    this.panels = new PanePanel(
+      { ...panes, ...(debuggerPane ? { debugger: debuggerPane } : {}) },
+      store.state.layout,
+      () => this.layoutChanged(),
+      ['run']
     );
     this.addWidget(this.panels);
     BoxPanel.setStretch(this.panels, 1);
@@ -130,7 +160,7 @@ export class Workbench extends BoxPanel {
       store,
       compiler: this.compiler,
       runner: this.runner,
-      debugger: this.debugger,
+      debugger: this.debugger ?? undefined,
       sharing: options.sharing,
       resetLayout: () => this.panels.reset(),
       compare: () => this.panels.compare(),
@@ -193,8 +223,9 @@ export class Workbench extends BoxPanel {
       this.registered.dispose();
       this.compiler.dispose();
       this.runner.dispose();
-      this.clangd.dispose();
-      this.debugger.dispose();
+      this.wat.dispose();
+      this.clangd?.dispose();
+      this.debugger?.dispose();
       this.store.dispose();
       super.dispose();
     }
@@ -220,6 +251,8 @@ export class Workbench extends BoxPanel {
         store={this.store}
         commands={this.options.commands}
         clangd={this.clangd}
+        debuggerAvailable={this.capabilities.debugger}
+        wat={this.wat}
         pane={pane}
         output={output}
         canShare={!!this.options.sharing}
@@ -281,8 +314,9 @@ export class Workbench extends BoxPanel {
   private readonly panels: PanePanel;
   private readonly compiler: ICompiler;
   private readonly runner: IRunner;
-  private readonly clangd: IClangdClient;
-  private readonly debugger: IDebuggerClient;
+  private readonly wat: IWatRenderer;
+  private readonly clangd: IClangdClient | null;
+  private readonly debugger: IDebuggerClient | null;
   private readonly registered: IDisposable;
   private readonly binding: IDisposable;
   private readonly unsubscribe: () => void;

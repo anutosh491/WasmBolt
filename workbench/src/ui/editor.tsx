@@ -30,7 +30,8 @@ import { editorExtensions } from './codemirror';
 
 interface IEditorProps {
   store: IStore;
-  clangd: IClangdClient;
+  clangd: IClangdClient | null;
+  debuggerAvailable: boolean;
   path: string;
   onChange(source: string): void;
   onResetExample(): void;
@@ -41,6 +42,7 @@ interface IEditorProps {
 export function Editor({
   store,
   clangd,
+  debuggerAvailable,
   path,
   onChange,
   onResetExample,
@@ -54,7 +56,7 @@ export function Editor({
     }
     let updating = false;
     let language = store.state.options.language;
-    const documents = clangdDocuments(clangd, store);
+    const documents = clangd ? clangdDocuments(clangd, store) : null;
     const dialect = new Compartment();
     const debugging = new Compartment();
     const extensions = () => (['c', 'cpp'].includes(language) ? cpp() : []);
@@ -67,11 +69,17 @@ export function Editor({
         extensions: [
           editorExtensions,
           dialect.of(extensions()),
-          autocompletion({
-            activateOnTyping: true,
-            override: [documents.completions]
-          }),
-          debugging.of(debugExtensions(store, onToggleBreakpoint)),
+          ...(documents
+            ? [
+                autocompletion({
+                  activateOnTyping: true,
+                  override: [documents.completions]
+                })
+              ]
+            : []),
+          debugging.of(
+            debuggerAvailable ? debugExtensions(store, onToggleBreakpoint) : []
+          ),
           history(),
           drawSelection(),
           syntaxHighlighting(
@@ -106,10 +114,10 @@ export function Editor({
       })
     });
     editor.current = view;
-    void documents.synchronize().catch(() => undefined);
+    void documents?.synchronize().catch(() => undefined);
     const unsubscribe = store.subscribe(() => {
       const state = store.state;
-      void documents.synchronize().catch(() => undefined);
+      void documents?.synchronize().catch(() => undefined);
       if (state.options.language !== language) {
         language = state.options.language;
         view.dispatch({ effects: dialect.reconfigure(extensions()) });
@@ -126,7 +134,7 @@ export function Editor({
         debug = nextDebug;
         view.dispatch({
           effects: debugging.reconfigure(
-            debugExtensions(store, onToggleBreakpoint)
+            debuggerAvailable ? debugExtensions(store, onToggleBreakpoint) : []
           )
         });
       }
@@ -158,11 +166,11 @@ export function Editor({
     return () => {
       observer.disconnect();
       unsubscribe();
-      documents.dispose();
+      documents?.dispose();
       view.destroy();
       editor.current = null;
     };
-  }, [store, clangd, onChange, onToggleBreakpoint]);
+  }, [store, clangd, debuggerAvailable, onChange, onToggleBreakpoint]);
   return (
     <>
       <div className="wasmbolt-file-actions">
@@ -230,11 +238,13 @@ function clangdDocuments(
 
   const synchronize = (): Promise<void> => {
     const state = store.state;
-    const supported =
-      state.options.language === 'c' || state.options.language === 'cpp';
+    const supported = supportsClangd(store);
     const documents = supported
       ? state.files.flatMap(file => {
-          if (!state.editableFiles.includes(file.path)) {
+          if (
+            file.path !== state.activeFile ||
+            !state.editableFiles.includes(file.path)
+          ) {
             return [];
           }
           const language = languageForPath(file.path);
@@ -287,7 +297,7 @@ function clangdDocuments(
     context: CompletionContext
   ): Promise<CompletionResult | null> => {
     const state = store.state;
-    if (state.options.language !== 'c' && state.options.language !== 'cpp') {
+    if (!supportsClangd(store)) {
       return null;
     }
     const line = context.state.doc.lineAt(context.pos);
@@ -305,16 +315,14 @@ function clangdDocuments(
     const path = projectPath(state.activeFile);
     try {
       await synchronize();
-      const result = await clangd.completion(
-        path,
-        {
-          line: line.number - 1,
-          character: context.pos - line.from
-        },
-        triggerCharacter
-          ? { triggerKind: 2, triggerCharacter }
-          : { triggerKind: 1 }
-      );
+      const position = {
+        line: line.number - 1,
+        character: context.pos - line.from
+      };
+      const completionContext = triggerCharacter
+        ? { triggerKind: 2 as const, triggerCharacter }
+        : { triggerKind: 1 as const };
+      const result = await clangd.completion(path, position, completionContext);
       if (disposed || projectPath(store.state.activeFile) !== path) {
         return null;
       }
@@ -340,6 +348,14 @@ function clangdDocuments(
       opened.clear();
     }
   };
+}
+
+function supportsClangd(store: IStore): boolean {
+  const { language, target } = store.state.options;
+  return (
+    target === 'wasm32-unknown-emscripten' &&
+    (language === 'c' || language === 'cpp')
+  );
 }
 
 function projectPath(path: string): string {
@@ -413,8 +429,18 @@ function debugExtensions(
   );
   const active = frame?.line;
   return [
+    keymap.of([
+      {
+        key: 'F9',
+        run: view => {
+          toggle(view.state.doc.lineAt(view.state.selection.main.head).number);
+          return true;
+        }
+      }
+    ]),
     gutter({
       class: 'cm-debug-gutter',
+      renderEmptyElements: true,
       markers: view =>
         RangeSet.of(
           breakpoints.flatMap(breakpoint => {

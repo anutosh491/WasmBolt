@@ -45,7 +45,7 @@ jobs:
               package = json.load(file)
           version = package['version']
           assert re.fullmatch(r'\d+\.\d+\.\d+', version), version
-          assert package['name'] == 'fortitudo'
+          assert package['name'] == 'wasmbolt'
           assert os.environ['RELEASE_REF'] == f'refs/tags/v{version}', (
               f'Run this workflow from the existing v{version} tag.'
           )
@@ -70,7 +70,7 @@ jobs:
     runs-on: ubuntu-24.04
     environment:
       name: pypi
-      url: https://pypi.org/project/fortitudo/
+      url: https://pypi.org/project/wasmbolt/
     permissions:
       contents: read
       id-token: write
@@ -94,7 +94,7 @@ jobs:
     runs-on: ubuntu-24.04
     environment:
       name: npm
-      url: https://www.npmjs.com/package/fortitudo
+      url: https://www.npmjs.com/package/wasmbolt
     permissions:
       contents: read
       id-token: write
@@ -113,5 +113,5 @@ jobs:
       - name: Publish to npm with trusted publishing
         run: |
           npm --version
-          npm publish ./dist/fortitudo.tgz --access public --tag latest \
+          npm publish ./dist/wasmbolt.tgz --access public --tag latest \
             --ignore-scripts --registry https://registry.npmjs.org

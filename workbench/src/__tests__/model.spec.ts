@@ -7,6 +7,7 @@ import {
   snapshot,
   stale
 } from '../model';
+import { availableOutputs, outputLabels } from '../compiler/types';
 import type { Result } from '../compiler/types';
 import { createStore } from '../state';
 import { session } from '../persistence';
@@ -24,6 +25,17 @@ const result: Result = {
   exitCode: 0,
   duration: 10
 };
+
+it('keeps the default output strip focused on compiler representations', () => {
+  expect(availableOutputs(options)).toEqual([
+    'ast',
+    'ir',
+    'graphs',
+    'assembly',
+    'wasm'
+  ]);
+  expect(outputLabels.graphs).toBe('Graphviz');
+});
 
 it('enables Run only when a current module can be reused or built', () => {
   const state = initial();
@@ -184,7 +196,7 @@ it('keeps output selections applicable when language and target change', () => {
     type: 'options',
     options: { ...state.options, language: 'mlir' }
   });
-  expect(state.outputs).toEqual({ primary: 'mlir', comparison: 'graphs' });
+  expect(state.outputs).toEqual({ primary: 'mlir', comparison: 'ir' });
   expect(
     reduce(state, { type: 'output', group: 'primary', output: 'ast' })
   ).toBe(state);

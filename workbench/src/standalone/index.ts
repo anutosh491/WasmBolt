@@ -11,7 +11,7 @@ import '../../style/standalone.css';
 
 const commands = new CommandRegistry();
 const sharing = createSharing(new URL(location.href));
-const key = 'fortitudo:session:v1';
+const key = 'wasmbolt:session:v2';
 const host = document.getElementById('wasmbolt');
 if (!host) {
   throw new Error('The WasmBolt page attachment is missing.');

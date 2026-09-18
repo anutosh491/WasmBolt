@@ -4,6 +4,11 @@
 Emscripten command-line programs. It is suitable for dedicated `mlir-opt`,
 `mlir-translate`, `opt` and `llc` builds.
 
+The default C/C++ Compile and Run path does not cross this boundary. The
+persistent compiler Worker asks Clang to produce an optimized object directly,
+then invokes its in-process `wasm-ld`. `opt` and `llc` Workers are reserved for
+explicit IR, graph, assembly, object, custom-pipeline, and terminal requests.
+
 The host supplies either an argv array or one direct command string, a complete
 workspace snapshot and the runtime asset names. The worker:
 

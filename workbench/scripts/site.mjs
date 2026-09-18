@@ -18,7 +18,7 @@ for (const file of [
   'lite/xeus/kernels.json',
   'lite/files/C++ examples.ipynb',
   'lite/files/C examples.ipynb',
-  'lite/files/Fortitudo guide.md',
+  'lite/files/WasmBolt guide.md',
   'lite/xeus/xeus-cpp/bin/xcpp.js',
   'lite/xeus/xeus-cpp/bin/xcpp.wasm',
   'lite/xeus/xeus-cpp/empack_env_meta.json',

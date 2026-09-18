@@ -18,36 +18,39 @@ interface ISection {
 const defaultArea: Area = {
   type: 'split-area',
   orientation: 'vertical',
-  sizes: [0.72, 0.28],
+  sizes: [0.76, 0.24],
   children: [
     {
       type: 'split-area',
       orientation: 'horizontal',
-      sizes: [0.16, 0.42, 0.42],
+      sizes: [0.14, 0.44, 0.42],
       children: [
         { type: 'tab-area', widgets: ['explorer'], currentIndex: 0 },
         { type: 'tab-area', widgets: ['source'], currentIndex: 0 },
-        { type: 'tab-area', widgets: ['outputs'], currentIndex: 0 }
+        {
+          type: 'tab-area',
+          widgets: ['outputs', 'debugger'],
+          currentIndex: 0
+        }
       ]
     },
-    {
-      type: 'tab-area',
-      widgets: ['terminal', 'diagnostics', 'debugger', 'run', 'pipelines'],
-      currentIndex: 0
-    }
+    { type: 'tab-area', widgets: ['terminal'], currentIndex: 0 }
   ]
 };
 
 /** Own pane composition; docking remains the responsibility of the host. */
 export class PanePanel extends BoxPanel {
   constructor(
-    private readonly panes: Readonly<Record<Pane, Widget>>,
+    private readonly panes: Readonly<Partial<Record<Pane, Widget>>>,
     area: Area | null,
-    private readonly onChange: () => void
+    private readonly onChange: () => void,
+    hidden: readonly Pane[] = []
   ) {
     super({ spacing: 0 });
     this.addClass('wasmbolt-panels');
-    this.section = this.create(area ?? defaultArea);
+    this.defaultArea = availableArea(defaultArea, panes) ?? defaultArea;
+    const restored = availableArea(area ?? this.defaultArea, panes, hidden);
+    this.section = this.create(restored ?? this.defaultArea);
     this.addWidget(this.section.widget);
   }
 
@@ -58,7 +61,7 @@ export class PanePanel extends BoxPanel {
 
   /** Reuse the views while replacing and disposing their layout containers. */
   reset(): void {
-    this.replace(defaultArea);
+    this.replace(this.defaultArea);
   }
 
   /** Toggle a second output group without disturbing the source split. */
@@ -93,6 +96,10 @@ export class PanePanel extends BoxPanel {
 
   /** Reveal a pane before sending focus to its view. */
   activatePane(pane: Pane): void {
+    if (this.section.activate(pane) || !this.panes[pane]) {
+      return;
+    }
+    this.replace(insertPane(this.save(), pane));
     this.section.activate(pane);
   }
 
@@ -108,7 +115,7 @@ export class PanePanel extends BoxPanel {
           pane === 'outputs' ||
           pane === 'comparison')
       ) {
-        const view = this.panes[pane];
+        const view = this.view(pane);
         let widget: Widget = view;
         if (pane === 'source') {
           const panel = new BoxPanel({
@@ -168,7 +175,7 @@ export class PanePanel extends BoxPanel {
         panel.fit();
       };
       for (const pane of area.widgets) {
-        panel.addWidget(this.panes[pane]);
+        panel.addWidget(this.view(pane));
       }
       panel.currentIndex = area.currentIndex;
       resize();
@@ -183,8 +190,8 @@ export class PanePanel extends BoxPanel {
           if (!area.widgets.includes(pane)) {
             return false;
           }
-          panel.currentWidget = this.panes[pane];
-          this.panes[pane].activate();
+          panel.currentWidget = this.view(pane);
+          this.view(pane).activate();
           return true;
         }
       };
@@ -228,8 +235,98 @@ export class PanePanel extends BoxPanel {
     }
   }
 
+  private view(pane: Pane): Widget {
+    const view = this.panes[pane];
+    if (!view) {
+      throw new Error(`Pane ${pane} is not available.`);
+    }
+    return view;
+  }
+
   private section: ISection;
+  private readonly defaultArea: Area;
   private restoring = false;
+}
+
+function availableArea(
+  area: Area,
+  panes: Readonly<Partial<Record<Pane, Widget>>>,
+  hidden: readonly Pane[] = []
+): Area | null {
+  if (area.type === 'tab-area') {
+    const selected = area.widgets[area.currentIndex];
+    const widgets = area.widgets.filter(
+      pane => panes[pane] !== undefined && !hidden.includes(pane)
+    );
+    if (!widgets.length) {
+      return null;
+    }
+    const selectedIndex = selected ? widgets.indexOf(selected) : -1;
+    return {
+      ...area,
+      widgets,
+      currentIndex:
+        area.currentIndex === -1 ? -1 : selectedIndex >= 0 ? selectedIndex : 0
+    };
+  }
+  const children = area.children.flatMap((child, index) => {
+    const available = availableArea(child, panes, hidden);
+    return available ? [{ area: available, size: area.sizes[index] }] : [];
+  });
+  if (!children.length) {
+    return null;
+  }
+  if (children.length === 1) {
+    return children[0].area;
+  }
+  return {
+    ...area,
+    children: children.map(child => child.area),
+    sizes: children.map(child => child.size)
+  };
+}
+
+function contains(area: Area, pane: Pane): boolean {
+  return area.type === 'tab-area'
+    ? area.widgets.includes(pane)
+    : area.children.some(child => contains(child, pane));
+}
+
+function insertPane(area: Area, pane: Pane): Area {
+  if (contains(area, pane)) {
+    return area;
+  }
+  if (area.type === 'tab-area') {
+    if (!area.widgets.includes('outputs')) {
+      return area;
+    }
+    const order: readonly Pane[] = [
+      'outputs',
+      'run',
+      'debugger',
+      'diagnostics',
+      'pipelines'
+    ];
+    const widgets = [...area.widgets, pane].sort(
+      (left, right) => order.indexOf(left) - order.indexOf(right)
+    );
+    return {
+      ...area,
+      widgets,
+      currentIndex: widgets.indexOf(pane)
+    };
+  }
+  let inserted = false;
+  return {
+    ...area,
+    children: area.children.map(child => {
+      if (inserted || !contains(child, 'outputs')) {
+        return child;
+      }
+      inserted = true;
+      return insertPane(child, pane);
+    })
+  };
 }
 
 function compare(area: Area): Area {

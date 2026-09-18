@@ -92,7 +92,7 @@ export function createClangd(options: ClangdOptions): IClangdClient {
   const create: () => IClangdWorker =
     options.createWorker ??
     (() => new Worker(options.workerUrl, { type: 'module', name: 'clangd' }));
-  const requestTimeout = options.requestTimeout ?? 15_000;
+  const requestTimeout = options.requestTimeout ?? 60_000;
   const documents = new Map<string, Document>();
   const diagnostics = new Set<(event: Diagnostics) => void>();
   const pending = new Map<JsonRpcId, Pending>();

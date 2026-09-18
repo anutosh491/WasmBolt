@@ -10,7 +10,7 @@ import {
 import { dirname, resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
-const output = resolve(root, 'fortitudo/site');
+const output = resolve(root, 'wasmbolt/site');
 const content = new Map();
 const routes = {};
 
@@ -32,7 +32,7 @@ function hash(path) {
 
 // The extension already owns the compiler. Every URL in the combined site
 // resolves to a packaged file, with identical assets stored only once.
-const extension = resolve(root, 'fortitudo/labextension');
+const extension = resolve(root, 'wasmbolt/labextension');
 for (const path of files(extension)) {
   content.set(hash(resolve(extension, path)), ['extension', path]);
 }

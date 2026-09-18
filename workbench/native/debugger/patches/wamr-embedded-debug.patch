@@ -1,0 +1,368 @@
+diff --git a/core/iwasm/libraries/debug-engine/debug_engine.c b/core/iwasm/libraries/debug-engine/debug_engine.c
+index 24d57d7..11bc31a 100644
+--- a/core/iwasm/libraries/debug-engine/debug_engine.c
++++ b/core/iwasm/libraries/debug-engine/debug_engine.c
+@@ -29,7 +29,8 @@ on_thread_stop_event(WASMDebugInstance *debug_inst, WASMExecEnv *exec_env)
+     os_mutex_lock(&debug_inst->wait_lock);
+     debug_inst->stopped_thread = exec_env;
+ 
+-    if (debug_inst->current_state == DBG_LAUNCHING) {
++    if (debug_inst->current_state == DBG_LAUNCHING
++        || !debug_inst->control_thread) {
+         /* In launching phase, send a signal so that handle_threadstop_request
+          * can be woken up */
+         os_cond_signal(&debug_inst->wait_cond);
+@@ -50,6 +51,9 @@ on_thread_exit_event(WASMDebugInstance *debug_inst, WASMExecEnv *exec_env)
+         debug_inst->stopped_thread = exec_env;
+     }
+ 
++    if (!debug_inst->control_thread)
++        os_cond_signal(&debug_inst->wait_cond);
++
+     os_mutex_unlock(&debug_inst->wait_lock);
+ }
+ 
+@@ -366,8 +370,9 @@ wasm_debug_engine_init(char *ip_addr, int32 process_port)
+ 
+ /* A debug Instance is a debug "process" in gdb remote protocol
+    and bound to a runtime cluster */
+-WASMDebugInstance *
+-wasm_debug_instance_create(WASMCluster *cluster, int32 port)
++static WASMDebugInstance *
++wasm_debug_instance_create_internal(WASMCluster *cluster, int32 port,
++                                    bool create_control_thread)
+ {
+     WASMDebugInstance *instance;
+     WASMExecEnv *exec_env = NULL;
+@@ -419,9 +424,19 @@ wasm_debug_instance_create(WASMCluster *cluster, int32 port)
+     }
+     instance->exec_mem_info.current_pos = instance->exec_mem_info.start_offset;
+ 
+-    if (!wasm_debug_control_thread_create(instance, port)) {
+-        LOG_ERROR("WASM Debug Engine error: failed to create control thread");
+-        goto fail3;
++    if (create_control_thread) {
++        if (!wasm_debug_control_thread_create(instance, port)) {
++            LOG_ERROR(
++                "WASM Debug Engine error: failed to create control thread");
++            goto fail3;
++        }
++    }
++    else {
++        instance->id = allocate_instance_id();
++        os_mutex_lock(&g_debug_engine->instance_list_lock);
++        bh_list_insert(&g_debug_engine->debug_instance_list, instance);
++        os_mutex_unlock(&g_debug_engine->instance_list_lock);
++        wasm_cluster_send_signal_all(instance->cluster, WAMR_SIG_SINGSTEP);
+     }
+ 
+     wasm_cluster_set_debug_inst(cluster, instance);
+@@ -438,6 +453,40 @@ fail1:
+     return NULL;
+ }
+ 
++WASMDebugInstance *
++wasm_debug_instance_create(WASMCluster *cluster, int32 port)
++{
++    return wasm_debug_instance_create_internal(cluster, port, true);
++}
++
++WASMDebugInstance *
++wasm_debug_instance_create_embedded(WASMCluster *cluster)
++{
++    return wasm_debug_instance_create_internal(cluster, 0, false);
++}
++
++bool
++wasm_debug_instance_wait_for_stop(WASMDebugInstance *instance, uint32 *status)
++{
++    WASMExecEnv *stopped_thread;
++
++    if (!instance)
++        return false;
++
++    os_mutex_lock(&instance->wait_lock);
++    while (!instance->stopped_thread)
++        os_cond_wait(&instance->wait_cond, &instance->wait_lock);
++
++    stopped_thread = instance->stopped_thread;
++    wasm_debug_instance_set_cur_thread(instance, stopped_thread->handle);
++    if (status)
++        *status = (uint32)stopped_thread->current_status->signal_flag;
++    instance->current_state = APP_STOPPED;
++    instance->stopped_thread = NULL;
++    os_mutex_unlock(&instance->wait_lock);
++    return true;
++}
++
+ static void
+ wasm_debug_instance_destroy_breakpoints(WASMDebugInstance *instance)
+ {
+@@ -482,8 +531,9 @@ wasm_debug_instance_destroy(WASMCluster *cluster)
+ 
+     instance = cluster->debug_inst;
+     if (instance) {
+-        /* destroy control thread */
+-        wasm_debug_control_thread_destroy(instance);
++        /* Destroy a control thread only for the socket-backed transport. */
++        if (instance->control_thread)
++            wasm_debug_control_thread_destroy(instance);
+ 
+         os_mutex_lock(&g_debug_engine->instance_list_lock);
+         bh_list_remove(&g_debug_engine->debug_instance_list, instance);
+diff --git a/core/iwasm/libraries/debug-engine/debug_engine.h b/core/iwasm/libraries/debug-engine/debug_engine.h
+index 891a0be..bef043f 100644
+--- a/core/iwasm/libraries/debug-engine/debug_engine.h
++++ b/core/iwasm/libraries/debug-engine/debug_engine.h
+@@ -123,6 +123,16 @@ on_thread_exit_event(WASMDebugInstance *debug_inst, WASMExecEnv *exec_env);
+ WASMDebugInstance *
+ wasm_debug_instance_create(WASMCluster *cluster, int32 port);
+ 
++/* Create only the debugger state for an in-process debugger. Unlike
++ * wasm_debug_instance_create(), this does not create a GDB-remote socket or a
++ * control thread: the embedding host drives stop/inspect/resume directly. */
++WASMDebugInstance *
++wasm_debug_instance_create_embedded(WASMCluster *cluster);
++
++/* Wait until an execution thread stops and make it the current debug thread. */
++bool
++wasm_debug_instance_wait_for_stop(WASMDebugInstance *instance, uint32 *status);
++
+ void
+ wasm_debug_instance_destroy(WASMCluster *cluster);
+ 
+diff --git a/core/iwasm/libraries/debug-engine/gdbserver.c b/core/iwasm/libraries/debug-engine/gdbserver.c
+index 2cf1e68..9548afa 100644
+--- a/core/iwasm/libraries/debug-engine/gdbserver.c
++++ b/core/iwasm/libraries/debug-engine/gdbserver.c
+@@ -87,6 +87,32 @@ fail:
+     return NULL;
+ }
+ 
++WASMGDBServer *
++wasm_create_gdbserver_embedded(WASMGDBWriteCallback write_callback,
++                               void *write_context)
++{
++    WASMGDBServer *server;
++
++    if (!write_callback)
++        return NULL;
++
++    if (!(server = wasm_runtime_malloc(sizeof(WASMGDBServer))))
++        return NULL;
++    memset(server, 0, sizeof(WASMGDBServer));
++
++    if (!(server->receive_ctx =
++              wasm_runtime_malloc(sizeof(rsp_recv_context_t)))) {
++        wasm_runtime_free(server);
++        return NULL;
++    }
++    memset(server->receive_ctx, 0, sizeof(rsp_recv_context_t));
++    server->listen_fd = (bh_socket_t)-1;
++    server->socket_fd = (bh_socket_t)-1;
++    server->write_callback = write_callback;
++    server->write_context = write_context;
++    return server;
++}
++
+ bool
+ wasm_gdbserver_listen(WASMGDBServer *server)
+ {
+@@ -328,3 +354,25 @@ wasm_gdbserver_handle_packet(WASMGDBServer *server)
+ 
+     return true;
+ }
++
++bool
++wasm_gdbserver_feed(WASMGDBServer *server, const uint8 *data, uint32 size)
++{
++    uint32 i;
++
++    if (!server || !data)
++        return false;
++
++    for (i = 0; i < size; ++i) {
++        int ret = on_rsp_byte_arrive(data[i], server->receive_ctx);
++        if (ret == 1) {
++            if (!server->noack)
++                write_data_raw(server, (uint8 *)"+", 1);
++            process_packet(server);
++        }
++        else if (ret == 2) {
++            handle_interrupt(server);
++        }
++    }
++    return true;
++}
+diff --git a/core/iwasm/libraries/debug-engine/gdbserver.h b/core/iwasm/libraries/debug-engine/gdbserver.h
+index 41ed94d..f177cd7 100644
+--- a/core/iwasm/libraries/debug-engine/gdbserver.h
++++ b/core/iwasm/libraries/debug-engine/gdbserver.h
+@@ -40,6 +40,9 @@ typedef struct WasmDebugPacket {
+     uint32 size;
+ } WasmDebugPacket;
+ 
++typedef bool (*WASMGDBWriteCallback)(const uint8 *data, uint32 size,
++                                     void *context);
++
+ struct WASMDebugControlThread;
+ typedef struct WASMGDBServer {
+     bh_socket_t listen_fd;
+@@ -48,11 +51,20 @@ typedef struct WASMGDBServer {
+     bool noack;
+     struct WASMDebugControlThread *thread;
+     rsp_recv_context_t *receive_ctx;
++    const char *module_name;
++    WASMGDBWriteCallback write_callback;
++    void *write_context;
+ } WASMGDBServer;
+ 
+ WASMGDBServer *
+ wasm_create_gdbserver(const char *host, int *port);
+ 
++/* Create a GDB-remote endpoint driven directly by an embedding host instead
++ * of a socket. Responses are delivered through write_callback. */
++WASMGDBServer *
++wasm_create_gdbserver_embedded(WASMGDBWriteCallback write_callback,
++                               void *write_context);
++
+ bool
+ wasm_gdbserver_listen(WASMGDBServer *server);
+ 
+@@ -67,4 +79,8 @@ wasm_close_gdbserver(WASMGDBServer *server);
+ 
+ bool
+ wasm_gdbserver_handle_packet(WASMGDBServer *server);
++
++/* Feed bytes received from an in-process GDB-remote client. */
++bool
++wasm_gdbserver_feed(WASMGDBServer *server, const uint8 *data, uint32 size);
+ #endif
+diff --git a/core/iwasm/libraries/debug-engine/handler.c b/core/iwasm/libraries/debug-engine/handler.c
+index 14c7fae..4b491c0 100644
+--- a/core/iwasm/libraries/debug-engine/handler.c
++++ b/core/iwasm/libraries/debug-engine/handler.c
+@@ -121,7 +121,8 @@ process_xfer(WASMGDBServer *server, const char *name, char *args)
+         snprintf(tmpbuf, MAX_PACKET_SIZE,
+                  "l<library-list><library name=\"%s\"><section "
+                  "address=\"0x%" PRIx64 "\"/></library></library-list>",
+-                 "nobody.wasm", addr);
++                 server->module_name ? server->module_name : "nobody.wasm",
++                 addr);
+ #endif
+         write_packet(server, tmpbuf);
+         os_mutex_unlock(&tmpbuf_lock);
+@@ -240,12 +241,12 @@ handle_general_query(WASMGDBServer *server, char *payload)
+     }
+ 
+     if (!strcmp(name, "HostInfo")) {
+-        mem2hex("wasm32-wamr-wasi-wasm", triple,
+-                strlen("wasm32-wamr-wasi-wasm"));
++        mem2hex("wasm32-unknown-unknown-wasm", triple,
++                strlen("wasm32-unknown-unknown-wasm"));
+ 
+         os_mutex_lock(&tmpbuf_lock);
+         snprintf(tmpbuf, MAX_PACKET_SIZE,
+-                 "vendor:wamr;ostype:wasi;arch:wasm32;"
++                 "vendor:unknown;ostype:unknown;arch:wasm32;"
+                  "triple:%s;endian:little;ptrsize:4;",
+                  triple);
+         write_packet(server, tmpbuf);
+@@ -271,13 +272,13 @@ handle_general_query(WASMGDBServer *server, char *payload)
+         uint64 pid;
+         pid = wasm_debug_instance_get_pid(
+             (WASMDebugInstance *)server->thread->debug_instance);
+-        mem2hex("wasm32-wamr-wasi-wasm", triple,
+-                strlen("wasm32-wamr-wasi-wasm"));
++        mem2hex("wasm32-unknown-unknown-wasm", triple,
++                strlen("wasm32-unknown-unknown-wasm"));
+ 
+         os_mutex_lock(&tmpbuf_lock);
+         snprintf(tmpbuf, MAX_PACKET_SIZE,
+                  "pid:%" PRIx64 ";parent-pid:%" PRIx64
+-                 ";vendor:wamr;ostype:wasi;arch:wasm32;"
++                 ";vendor:unknown;ostype:unknown;arch:wasm32;"
+                  "triple:%s;endian:little;ptrsize:4;",
+                  pid, pid, triple);
+         write_packet(server, tmpbuf);
+@@ -415,7 +416,7 @@ send_thread_stop_status(WASMGDBServer *server, uint32 status, korp_tid tid)
+     // TODO: how name a wasm thread?
+     len = snprintf(tmpbuf, MAX_PACKET_SIZE,
+                    "T%02" PRIx32 "thread:%" PRIx64 ";name:%s;", gdb_status,
+-                   (uint64)(uintptr_t)tid, "nobody");
++                   (uint64)(uintptr_t)tid, "main");
+     if (len < 0 || len >= MAX_PACKET_SIZE) {
+         send_reply(server, "E01");
+         os_mutex_unlock(&tmpbuf_lock);
+@@ -511,6 +512,15 @@ send_thread_stop_status(WASMGDBServer *server, uint32 status, korp_tid tid)
+     os_mutex_unlock(&tmpbuf_lock);
+ }
+ 
++void
++send_process_exit_status(WASMGDBServer *server, uint32 status)
++{
++    os_mutex_lock(&tmpbuf_lock);
++    (void)snprintf(tmpbuf, MAX_PACKET_SIZE, "W%02" PRIx32, status & 0xff);
++    send_reply(server, tmpbuf);
++    os_mutex_unlock(&tmpbuf_lock);
++}
++
+ void
+ handle_v_packet(WASMGDBServer *server, char *payload)
+ {
+diff --git a/core/iwasm/libraries/debug-engine/handler.h b/core/iwasm/libraries/debug-engine/handler.h
+index 698663c..de5115f 100644
+--- a/core/iwasm/libraries/debug-engine/handler.h
++++ b/core/iwasm/libraries/debug-engine/handler.h
+@@ -67,4 +67,7 @@ handle_detach_request(WASMGDBServer *server, char *payload);
+ 
+ void
+ send_thread_stop_status(WASMGDBServer *server, uint32 status, korp_tid tid);
++
++void
++send_process_exit_status(WASMGDBServer *server, uint32 status);
+ #endif
+diff --git a/core/iwasm/libraries/debug-engine/packets.c b/core/iwasm/libraries/debug-engine/packets.c
+index 1bdb3d2..4e94b8c 100644
+--- a/core/iwasm/libraries/debug-engine/packets.c
++++ b/core/iwasm/libraries/debug-engine/packets.c
+@@ -12,6 +12,14 @@ write_data_raw(WASMGDBServer *gdbserver, const uint8 *data, ssize_t len)
+ {
+     ssize_t nwritten;
+ 
++    if (gdbserver->write_callback) {
++        if (!gdbserver->write_callback(data, (uint32)len,
++                                       gdbserver->write_context)) {
++            LOG_ERROR("Embedded GDB transport write error\n");
++        }
++        return;
++    }
++
+     nwritten = os_socket_send(gdbserver->socket_fd, data, len);
+     if (nwritten < 0) {
+         LOG_ERROR("Write error\n");
+diff --git a/core/shared/platform/include/platform_wasi_types.h b/core/shared/platform/include/platform_wasi_types.h
+index 980d3f8..121f236 100644
+--- a/core/shared/platform/include/platform_wasi_types.h
++++ b/core/shared/platform/include/platform_wasi_types.h
+@@ -53,6 +53,11 @@ assert_wasi_layout(_Alignof(int64_t) == 8, "non-wasi data layout");
+ assert_wasi_layout(_Alignof(uint64_t) == 8, "non-wasi data layout");
+ #endif
+ 
++#if defined(__EMSCRIPTEN__)
++/* Emscripten's libc already declares the preview1 ABI types. */
++#include <wasi/api.h>
++#else
++
+ typedef uint32_t __wasi_size_t;
+ assert_wasi_layout(_Alignof(__wasi_size_t) == 4, "non-wasi data layout");
+ 
+@@ -532,6 +537,8 @@ assert_wasi_layout(_Alignof(__wasi_subscription_t) == 8, "witx calculated align"
+ assert_wasi_layout(offsetof(__wasi_subscription_t, userdata) == 0, "witx calculated offset");
+ assert_wasi_layout(offsetof(__wasi_subscription_t, u) == 8, "witx calculated offset");
+ 
++#endif /* defined(__EMSCRIPTEN__) */
++
+ /* keep syncing with wasi_socket_ext.h */
+ 
+ typedef uint16_t __wasi_ip_port_t;

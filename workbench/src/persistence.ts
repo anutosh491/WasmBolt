@@ -19,6 +19,12 @@ const panes: readonly Pane[] = [
   'run',
   'pipelines'
 ];
+const requiredPanes: readonly Pane[] = [
+  'explorer',
+  'source',
+  'outputs',
+  'terminal'
+];
 
 /** Validate and migrate editing state without initializing the compiler. */
 export function session(value: unknown): Session | null {
@@ -41,8 +47,8 @@ export function session(value: unknown): Session | null {
   if (
     value.layout !== null &&
     (!layout ||
-      !(legacy ? ['source', 'outputs', 'diagnostics'] : panes).every(name =>
-        [...seen].some(pane => pane === name)
+      !(legacy ? ['source', 'outputs', 'diagnostics'] : requiredPanes).every(
+        name => [...seen].some(pane => pane === name)
       ))
   ) {
     return null;

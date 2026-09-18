@@ -1,5 +1,5 @@
 {
-    "name": "fortitudo",
+    "name": "wasmbolt",
     "version": "0.7.0",
     "workspaces": [
         "lite/brand"
@@ -15,14 +15,14 @@
         "jupyterlite",
         "lumino"
     ],
-    "homepage": "https://fortitudo.cc",
+    "homepage": "https://anutosh491.github.io/WasmBolt/",
     "bugs": {
-        "url": "https://github.com/afshin/fortitudo/issues"
+        "url": "https://github.com/anutosh491/WasmBolt/issues"
     },
     "license": "BSD-3-Clause",
     "author": {
-        "name": "A. T. Darian",
-        "email": "fortitudo@darian.at"
+        "name": "Anutosh Bhat",
+        "email": "andersonbhat491@gmail.com"
     },
     "files": [
         "lib/**/*.{d.ts,eot,gif,html,jpg,js,js.map,json,png,svg,woff2,ttf}",
@@ -43,7 +43,7 @@
     "style": "style/index.css",
     "repository": {
         "type": "git",
-        "url": "https://github.com/afshin/fortitudo.git"
+        "url": "https://github.com/anutosh491/WasmBolt.git"
     },
     "scripts": {
         "build": "jlpm build:lib && jlpm build:worker && jlpm check:compiler && jlpm build:labextension:dev",
@@ -57,8 +57,9 @@
         "clean": "jlpm clean:lib",
         "clean:lib": "rimraf lib tsconfig.tsbuildinfo",
         "clean:lintcache": "rimraf .eslintcache .stylelintcache",
-        "clean:labextension": "rimraf fortitudo/labextension fortitudo/_version.py",
-        "clean:all": "jlpm clean:lib && jlpm clean:labextension && jlpm clean:lintcache",
+        "clean:lab": "rimraf wasmbolt/labextension wasmbolt/_version.py",
+        "clean:labextension": "jlpm clean:lab",
+        "clean:all": "jlpm clean:lib && jlpm clean:lab && jlpm clean:lintcache",
         "eslint": "jlpm eslint:check --fix",
         "eslint:check": "eslint src --max-warnings 0",
         "install:extension": "jlpm build",
@@ -74,7 +75,7 @@
         "watch:guide": "node scripts/guide.mjs --watch",
         "watch:src": "tsc -b tsconfig.json tsconfig.worker.json -w",
         "watch:labextension": "jupyter-builder watch .",
-        "build:worker": "vite build --config vite.worker.config.mjs",
+        "build:worker": "node scripts/workers.mjs",
         "build:compiler": "node scripts/compiler.mjs build",
         "check:compiler": "node scripts/compiler.mjs check",
         "build:standalone": "jlpm build:lib && jlpm build:worker && jlpm check:compiler && vite build",
@@ -110,7 +111,8 @@
         "@lumino/messaging": "^2.0.3",
         "@lumino/widgets": "^2.7.3",
         "react": "^18.2.0",
-        "react-dom": "^18.2.0"
+        "react-dom": "^18.2.0",
+        "wabt": "1.0.39"
     },
     "devDependencies": {
         "@eslint/js": "^9.0.0",
@@ -157,7 +159,7 @@
     },
     "jupyterlab": {
         "extension": "lib/jupyter/plugin.js",
-        "outputDir": "fortitudo/labextension",
+        "outputDir": "wasmbolt/labextension",
         "schemaDir": "schema",
         "webpackConfig": "webpack.config.cjs"
     },
