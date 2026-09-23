@@ -16,6 +16,7 @@ const demos = [
   ['simple.cpp', 'simple.cpp', 'simple.wasm'],
   ['simple.c', 'simple.c', 'simple-c.wasm'],
   ['iostream.cpp', 'iostream.cpp', 'iostream.wasm'],
+  ['pause.cpp', 'pause.cpp', 'pause.wasm'],
   ['xtl.cpp', 'xtl.cpp', 'xtl.wasm'],
   ['xtensor.cpp', 'xtensor.cpp', 'xtensor.wasm'],
   ['json.cpp', 'nlohmann_json.cpp', 'nlohmann_json.wasm'],

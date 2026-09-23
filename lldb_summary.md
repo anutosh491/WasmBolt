@@ -13,16 +13,18 @@ browser. One debug session must support source breakpoints, Continue, Pause,
 Step Over, Step Into, Step Out, frames, locals, a debug console, and LLDB
 commands entered from the Terminal.
 
-The user-facing build command stays conventional:
+The long-term user-facing build command stays conventional:
 
 ```text
 clang++ -g -O0 source.cpp -o program.wasm
 ```
 
-The compiler driver owns its sysroot, runtime libraries, and linker expansion.
-The UI must not print or reconstruct the expanded `wasm-ld` invocation. Start
-Debugging compiles once when necessary and attaches to the resulting module;
-debugger commands never recompile it.
+Until Clang's ToolSession-owned linker dispatch lands, the focused demo is
+honest about its two in-process tool calls: Clang compiles the source to
+`debug.o`, then `wasm-ld` links `debug.wasm` with `-L` and named Emscripten
+libraries. It does not print an expanded list of archive paths. Start Debugging
+performs both calls and attaches once; debugger commands never recompile the
+module.
 
 ## Architecture
 
@@ -91,6 +93,11 @@ WAMR stops the interpreter, the listener reports the stopped state, and the
 adapter publishes `reason: pause`. The earlier custom shared-memory pause pump
 was removed because it was unnecessary.
 
+The WasmBolt Worker schedules Pause as an interrupt instead of placing it
+behind a still-pending DAP attach operation. It exposes the running state only
+after `configurationDone`. This preserves native halt semantics while avoiding
+a browser scheduling race in which a short program exits first.
+
 ### Emscripten source loading
 
 When DAP selects a frame, LLDB's `SourceManager` loads the source file. Native
@@ -123,8 +130,8 @@ The clean test artifact hashes are:
 
 | Artifact        | SHA-256                                                            |
 | --------------- | ------------------------------------------------------------------ |
-| `lldb-dap.js`   | `5c5ba4d4943f519b04ca345d3110fe7b9e18cf783b554eedfb4e1608839f9cf9` |
-| `lldb-dap.wasm` | `8fffc68a209af6bffb8fcff109f17740bc7e2334783a98b2e955493460f2bfe6` |
+| `lldb-dap.js`   | `2069e50043b14f000834648d979f9d378b67b2269a61dc917f7d9e4f87021b14` |
+| `lldb-dap.wasm` | `e7862c3384ed6ef0b54d84210dad64ba54a81feb27f532135c025a0e9931b587` |
 | pthread Worker  | `f205167738aa5cca162f248ac4c916f7f14ad061cf6064493da58eb766549bc2` |
 
 The module uses Wasm exceptions, tail calls, `-pthread`, a 16-thread pool,
@@ -145,6 +152,9 @@ clean source patch, tracing disabled, and no thread-selection workaround.
   continued to exit.
 - Direct LLDB commands: two breakpoints, continue, backtrace, frame variables,
   step-over, and exit.
+- The integrated UI passed physical gutter clicks, Debug Console `bt`, Terminal
+  `lldb frame variable`, restart with retained breakpoints, Pause with locals
+  and a source stack, and Stop followed by a clean Start.
 - `iostream`: stopped and stepped in `calculate_score`, captured
   `score=25`, and exited correctly.
 - xtensor: stopped in `xtensor_broadcast_sum`, displayed xtensor expression
@@ -175,14 +185,11 @@ xtensor, nlohmann_json, and LLVM IR. Each source was paired with its exact
 Emscripten 6.0.8 module through a byte-size and SHA-256 manifest; selecting the
 module attaches directly and avoids the legacy in-browser debug build path.
 
-By contrast, a debug module produced by the older WasmBolt Emscripten 4.0.9
-frontend plus its manually expanded link command could hit a breakpoint and
-return variables, but its subsequent Step Into request failed. The same UI,
-adapter, LLDB, and WAMR succeeded when only the guest module was replaced by
-the Emscripten 6.x driver-built artifact. Product integration must therefore
-use one compatible Emscripten 6.x compiler/sysroot/runtime family and the real
-driver link path; the old manually linked module is not an acceptable debug
-artifact.
+The focused WasmBolt compiler now uses the same Emscripten 6.0.8 family as the
+debugger. Start builds `debug.o`, links `debug.wasm`, and the resulting module
+passes the complete stepping flow. The earlier Emscripten 4.0.9/manual-link
+module could hit a breakpoint but failed Step Into; it is no longer used by the
+focused debugger link.
 
 ## LLVM foundation already upstream
 
@@ -216,18 +223,16 @@ appear in the WAMR patch.
 
 ## Still required
 
-- Test disconnect, same-Worker restart, invalid modules, failed breakpoint
-  resolution, and replacement after a deliberately poisoned session.
+- Test disconnect, invalid modules, failed breakpoint resolution, and
+  replacement after a deliberately poisoned session.
 - Review the WAMR patch as a standalone upstream change and add native tests.
-- Promote the debugger playground's integrated browser matrix into committed
-  WasmBolt UI tests and finish Terminal-to-DAP breakpoint synchronization.
-- Move the WasmBolt compiler/debug-module build to the same compatible
-  Emscripten 6.x toolchain validated with LLDB and WAMR.
-- Make Start Debugging use the simple compiler-driver command and attach to its
-  output without printing the expanded runtime-library link command.
-- Restore package files through the same verified empack environment used by
-  the compiler; do not bake third-party headers into debugger artifacts.
-- Run the integrated WasmBolt browser tests before publishing a public link.
+- Promote the latest integrated browser acceptance pass into a committed UI
+  test before publishing a public link.
+- Land the Clang ToolSession linker path, then replace the current honest
+  two-stage build with the conventional one-driver command.
+- Add Emscripten 6x xtl and xtensor recipes. Their current header-only 4x
+  packages are verified with the Emscripten 6 compiler but remain explicit
+  packaging follow-up.
 
 ## Product invariant
 

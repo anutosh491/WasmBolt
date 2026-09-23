@@ -7,36 +7,40 @@ an in-memory GDB-remote transport.
 
 ## Open the debugger playground
 
-For the local WasmBolt build, open:
+For the current local WasmBolt build, open:
 
 ```text
-http://127.0.0.1:4189/?debugger=1
+http://127.0.0.1:4192/?debugger=1
 ```
 
-This special page loads exact source/wasm pairs built by Emscripten 6.0.8. The
-files are size-checked and SHA-256 verified before they enter the workspace.
-They let us validate LLDB independently from WasmBolt's older compiler runtime.
+This focused page loads source files and the Emscripten 6.0.8 compiler and
+debugger runtimes. Generated `debug.o` and `debug.wasm` files appear only after
+Start builds the selected source.
 
 For every example:
 
 1. Click the bug button. Its blue active state means debugging is enabled.
 2. Open the source file and click the debugger gutter at the documented line.
-3. Select the matching `.wasm` file in Explorer.
-4. Open **Debugger** and click **Start**.
-5. Inspect Variables and Call Stack, then use the toolbar or enter an LLDB
+3. Open **Debugger** and click **Start**. It compiles, links, and attaches.
+4. Inspect Variables and Call Stack, then use the toolbar or enter an LLDB
    command in the debug console.
-6. Continue to process exit before opening the next pair.
+5. Continue to process exit before opening the next example.
 
-Selecting a supplied module means Start only attaches the debugger. It does
-not compile again and it does not print an expanded linker command.
+Clicking the generated `debug.wasm` opens its WAT rendering. Debug controls do
+not rebuild the module; a rebuild occurs only when Start needs a fresh module.
 
-### Demo matrix
+### Acceptance matrix
+
+The focused link builds the C and C++ sources when Start is pressed. The
+source-controlled standalone harness also keeps exact source/module pairs for
+independent LLDB testing, including the LLVM IR case.
 
 | Source              | Module               | Breakpoint | Expected stop                          |
 | ------------------- | -------------------- | ---------: | -------------------------------------- |
 | `simple.cpp`        | `simple.wasm`        |         12 | `compute`, `input = 7`                 |
 | `simple.c`          | `simple-c.wasm`      |         11 | `main`, `input = 17`                   |
 | `iostream.cpp`      | `iostream.wasm`      |         16 | `calculate_score`, `base = 10`         |
+| `pause.cpp`         | `pause.wasm`         |          - | Pause inside `busy_work`               |
 | `xtl.cpp`           | `xtl.wasm`           |          8 | `optional_score`, `input = 13`         |
 | `xtensor.cpp`       | `xtensor.wasm`       |         10 | `xtensor_broadcast_sum`, `total = 141` |
 | `nlohmann_json.cpp` | `nlohmann_json.wasm` |          7 | `json_score`, `base = 35`, `bonus = 7` |
@@ -83,15 +87,16 @@ int compute(int input) {
 int main() { return compute(7); }
 ```
 
-The user-facing command is intentionally ordinary:
+The long-term user-facing command is intentionally ordinary:
 
 ```bash
 clang++ -g -O0 simple.cpp -o simple.wasm
 ```
 
-`clang++` owns the Emscripten sysroot, runtime libraries, and linker command.
-WasmBolt must not require users to type or inspect an expanded `wasm-ld`
-invocation.
+Until Clang's ToolSession-owned linker dispatch lands, Start honestly shows two
+commands: a `clang++ -O0 -g -c` compile to `debug.o`, followed by `wasm-ld`
+using `-L` and named Emscripten libraries. The user does not type them, and the
+Terminal does not show a long expansion of individual archive paths.
 
 ## Use the Debugger panel
 
@@ -114,6 +119,11 @@ The validated sequence is:
 Adjacent breakpoints at lines 12 and 13 and distant breakpoints in `compute`
 and `add` have both been tested as separate multiple-breakpoint flows. Pause
 also stops a running loop and returns a valid source frame.
+
+Restart creates a fresh debugger Worker and reapplies the current breakpoints.
+Stop discards the Worker, clears frames and variables, and enables a clean
+Start. The sequence Start, breakpoint, Stop, Start, same breakpoint has passed
+in the browser UI.
 
 ## Enter LLDB commands in the Terminal
 
@@ -177,11 +187,10 @@ acceptance module.
 
 The local debugger playground has passed integrated gutter breakpoints, frames,
 and variables for all seven source/module pairs in the table. The simple C++
-pair additionally passed Step Into, Step Out, Step Over, and Continue in the
-WasmBolt UI.
+pair additionally passed Step Into, Step Out, Step Over, Continue, Restart, and
+Stop in the WasmBolt UI. Debug Console `bt`, Terminal
+`lldb frame variable`, and Pause inside `busy_work` also passed.
 
-WasmBolt's older Emscripten 4.0.9/manual-link debug module is not compatible
-enough for the full stepping flow. Until the compiler runtime moves to the
-validated Emscripten 6.x driver path, editing a playground source does not
-rebuild its paired module. Re-stage the examples after rebuilding them rather
-than assuming that edited source still matches the embedded DWARF.
+The focused compiler and debugger now use the same Emscripten 6.0.8 family.
+The earlier Emscripten 4.0.9/manual-link debug module could stop at a breakpoint
+but failed Step Into and is not used by the current focused link.

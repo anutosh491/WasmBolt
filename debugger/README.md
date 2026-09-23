@@ -13,6 +13,9 @@ The committed pieces are:
 - `smoke/`: a cross-origin-isolated Chromium acceptance runner; and
 - `tests/`: small C++ fixtures plus xtensor and nlohmann_json coverage.
 
+[`WASMBOLT_INTEGRATION.md`](WASMBOLT_INTEGRATION.md) records the product-side
+Worker, compiler, DAP ordering, lifecycle, UI, and acceptance requirements.
+
 All generated state is written below the ignored `debugger/.work/` directory.
 The product architecture, exact validated behaviors, upstream plan, and known
 remaining work are recorded in [`../lldb_summary.md`](../lldb_summary.md).
@@ -67,6 +70,13 @@ node smoke/run.mjs pause
 node smoke/run.mjs iostream
 node smoke/run.mjs xtensor
 node smoke/run.mjs json
+```
+
+After staging the runtime into a WasmBolt checkout and serving its focused
+debugger page, run the complete product acceptance flow against its URL:
+
+```bash
+node smoke/wasmbolt.mjs http://127.0.0.1:4192/?debugger=1
 ```
 
 The runner serves only localhost, adds the COOP/COEP headers required for
