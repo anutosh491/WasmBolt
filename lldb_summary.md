@@ -78,6 +78,14 @@ after attach, then drains the same `SBListener` non-blockingly from its Worker.
 It publishes events with LLDB-DAP's existing helpers. There is exactly one
 event consumer. No breakpoint is hidden, serialized, or emulated by the UI.
 
+The JavaScript drain loop must call `wasmbolt_dap_poll_runtime()` before it
+reads `wasmbolt_dap_message_count()`. Omitting that poll leaves the inferior
+correctly stopped inside LLDB, but no DAP `stopped` event reaches the UI. This
+was reproduced in the WasmBolt integration: `breakpoint list` showed a resolved
+and hit breakpoint and `process status` showed the stopped source frame while
+the panel still appeared to be running. Restoring the poll immediately made
+the panel receive the frame, scopes, and variables.
+
 Pause uses the ordinary DAP `pause` request. LLDB calls `SBProcess::Halt()`,
 WAMR stops the interpreter, the listener reports the stopped state, and the
 adapter publishes `reason: pause`. The earlier custom shared-memory pause pump
@@ -152,6 +160,20 @@ was available. The measured xtensor flow took approximately 827 ms and the
 nlohmann_json flow approximately 549 ms. These are debugger-flow measurements,
 not initial network download measurements.
 
+The adapter was also exercised through the WasmBolt UI with the exact
+Emscripten 6.x `simple.wasm` acceptance artifact. The panel stopped at the
+gutter breakpoint, displayed locals and the call stack, stepped into `add`,
+stepped out, stepped over, and continued to exit with status 31.
+
+By contrast, a debug module produced by the older WasmBolt Emscripten 4.0.9
+frontend plus its manually expanded link command could hit a breakpoint and
+return variables, but its subsequent Step Into request failed. The same UI,
+adapter, LLDB, and WAMR succeeded when only the guest module was replaced by
+the Emscripten 6.x driver-built artifact. Product integration must therefore
+use one compatible Emscripten 6.x compiler/sysroot/runtime family and the real
+driver link path; the old manually linked module is not an acceptable debug
+artifact.
+
 ## LLVM foundation already upstream
 
 - [LLVM #223169](https://github.com/llvm/llvm-project/pull/223169):
@@ -187,8 +209,10 @@ appear in the WAMR patch.
 - Test disconnect, same-Worker restart, invalid modules, failed breakpoint
   resolution, and replacement after a deliberately poisoned session.
 - Review the WAMR patch as a standalone upstream change and add native tests.
-- Integrate the proven adapter into WasmBolt's explicitly enabled Debugger
-  panel and Terminal.
+- Finish the WasmBolt product integration around the proven Debugger panel,
+  including Terminal routing and automated browser coverage.
+- Move the WasmBolt compiler/debug-module build to the same compatible
+  Emscripten 6.x toolchain validated with LLDB and WAMR.
 - Make Start Debugging use the simple compiler-driver command and attach to its
   output without printing the expanded runtime-library link command.
 - Restore package files through the same verified empack environment used by

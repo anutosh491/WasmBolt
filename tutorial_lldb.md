@@ -43,11 +43,10 @@ invocation.
 
 1. Click the bug button to enable debugging. The debugger is off by default.
 2. Open `simple.cpp` and click the gutter at line 12, the `sum` assignment.
-3. Add another breakpoint at line 7 in `multiply` or line 2 in `add`.
-4. Click **Start**. WasmBolt builds the module once if the source is newer and
+3. Click **Start**. WasmBolt builds the module once if the source is newer and
    attaches LLDB-DAP to that `.wasm` file.
-5. Inspect Variables and Call Stack when execution pauses.
-6. Use Continue, Pause, Step Over, Step Into, Step Out, Restart, and Stop from
+4. Inspect Variables and Call Stack when execution pauses.
+5. Use Continue, Pause, Step Over, Step Into, Step Out, Restart, and Stop from
    the debugger toolbar.
 
 The validated sequence is:
@@ -59,8 +58,8 @@ The validated sequence is:
 - Continue to exit with status 31.
 
 Adjacent breakpoints at lines 12 and 13 and distant breakpoints in `compute`
-and `add` have both been tested. Pause also stops a running loop and returns a
-valid source frame.
+and `add` have both been tested as separate multiple-breakpoint flows. Pause
+also stops a running loop and returns a valid source frame.
 
 ## Enter LLDB commands in the Terminal
 
@@ -117,6 +116,13 @@ probe inspects a parsed JSON object, `base = 35`, `bonus = 7`, and
 
 ## Current boundary
 
-Everything above has passed in the standalone Chromium harness. The WasmBolt
-UI integration and its local URL must pass the same matrix before this tutorial
-can be presented as an end-user guarantee or deployed publicly.
+Everything above has passed in the standalone Chromium harness. The core UI
+sequence—gutter breakpoint, frames, variables, Step Into, Step Out, Step Over,
+and Continue—also passed inside WasmBolt when loading the same Emscripten 6.x
+acceptance module.
+
+WasmBolt's older Emscripten 4.0.9/manual-link debug module is not compatible
+enough for the full stepping flow. The public product must move its compiler
+and debug-module construction to the validated Emscripten 6.x driver path,
+then run the complete matrix in the integrated UI before this tutorial is an
+end-user guarantee.
