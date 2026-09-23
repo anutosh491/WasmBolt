@@ -5,6 +5,60 @@ debugger and the workflow the WasmBolt IDE must expose. The debugger runs
 entirely in the browser: LLDB-DAP talks to WAMR's classic interpreter through
 an in-memory GDB-remote transport.
 
+## Open the debugger playground
+
+For the local WasmBolt build, open:
+
+```text
+http://127.0.0.1:4189/?debugger=1
+```
+
+This special page loads exact source/wasm pairs built by Emscripten 6.0.8. The
+files are size-checked and SHA-256 verified before they enter the workspace.
+They let us validate LLDB independently from WasmBolt's older compiler runtime.
+
+For every example:
+
+1. Click the bug button. Its blue active state means debugging is enabled.
+2. Open the source file and click the debugger gutter at the documented line.
+3. Select the matching `.wasm` file in Explorer.
+4. Open **Debugger** and click **Start**.
+5. Inspect Variables and Call Stack, then use the toolbar or enter an LLDB
+   command in the debug console.
+6. Continue to process exit before opening the next pair.
+
+Selecting a supplied module means Start only attaches the debugger. It does
+not compile again and it does not print an expanded linker command.
+
+### Demo matrix
+
+| Source              | Module               | Breakpoint | Expected stop                          |
+| ------------------- | -------------------- | ---------: | -------------------------------------- |
+| `simple.cpp`        | `simple.wasm`        |         12 | `compute`, `input = 7`                 |
+| `simple.c`          | `simple-c.wasm`      |         11 | `main`, `input = 17`                   |
+| `iostream.cpp`      | `iostream.wasm`      |         16 | `calculate_score`, `base = 10`         |
+| `xtl.cpp`           | `xtl.wasm`           |          8 | `optional_score`, `input = 13`         |
+| `xtensor.cpp`       | `xtensor.wasm`       |         10 | `xtensor_broadcast_sum`, `total = 141` |
+| `nlohmann_json.cpp` | `nlohmann_json.wasm` |          7 | `json_score`, `base = 35`, `bonus = 7` |
+| `debug.ll`          | `debug-ir.wasm`      |          9 | `ir_add`, `left = 19`, `right = 23`    |
+
+For the complete stepping example, use `simple.cpp`: Step Into from line 12
+enters `add`, Step Out returns to `compute`, Step Over advances to line 13,
+and Continue exits with status 31.
+
+### Debug LLVM IR
+
+LLVM IR can be source-debugged when it carries valid debug metadata. The
+included `debug.ll` defines `DICompileUnit`, `DISubprogram`, local-variable,
+and line-location metadata and uses `llvm.dbg.value` for its arguments. A tiny
+C entry point calls `ir_add`; line 9 therefore stops with `left = 19` and
+`right = 23` visible in LLDB.
+
+An arbitrary plain `.ll` file without `!DI*` metadata has no source-line or
+local-variable mapping for LLDB. It can still be inspected at the function or
+instruction level, but the editor cannot truthfully offer C-like line stepping
+or named locals that are absent from the module.
+
 ## Build a debuggable module
 
 Start with `simple.cpp`:
@@ -121,8 +175,13 @@ sequence—gutter breakpoint, frames, variables, Step Into, Step Out, Step Over,
 and Continue—also passed inside WasmBolt when loading the same Emscripten 6.x
 acceptance module.
 
+The local debugger playground has passed integrated gutter breakpoints, frames,
+and variables for all seven source/module pairs in the table. The simple C++
+pair additionally passed Step Into, Step Out, Step Over, and Continue in the
+WasmBolt UI.
+
 WasmBolt's older Emscripten 4.0.9/manual-link debug module is not compatible
-enough for the full stepping flow. The public product must move its compiler
-and debug-module construction to the validated Emscripten 6.x driver path,
-then run the complete matrix in the integrated UI before this tutorial is an
-end-user guarantee.
+enough for the full stepping flow. Until the compiler runtime moves to the
+validated Emscripten 6.x driver path, editing a playground source does not
+rebuild its paired module. Re-stage the examples after rebuilding them rather
+than assuming that edited source still matches the embedded DWARF.

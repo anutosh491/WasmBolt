@@ -110,22 +110,22 @@ path. This is the minimal LLVM patch to propose upstream.
 The reproducible experiment lives under `debugger/`; all generated state lives
 under its ignored `.work` directory.
 
-| Input | Pinned identity |
-| --- | --- |
-| LLVM | `11b427b038a33f4301bdbc818ffc77c425e4494a` |
-| WAMR | `d7050d9fe672e2d0bc65c44c966cebc0a1aca14b` |
-| Emscripten | `6.0.8-h53c7e63_1` from emscripten-forge 6x |
-| xtensor | `0.27.1-h0b0027f_0` from emscripten-forge 4x |
-| xtl | `0.8.2-h0b0027f_0` from emscripten-forge 4x |
+| Input         | Pinned identity                              |
+| ------------- | -------------------------------------------- |
+| LLVM          | `11b427b038a33f4301bdbc818ffc77c425e4494a`   |
+| WAMR          | `d7050d9fe672e2d0bc65c44c966cebc0a1aca14b`   |
+| Emscripten    | `6.0.8-h53c7e63_1` from emscripten-forge 6x  |
+| xtensor       | `0.27.1-h0b0027f_0` from emscripten-forge 4x |
+| xtl           | `0.8.2-h0b0027f_0` from emscripten-forge 4x  |
 | nlohmann_json | `3.12.0-h2d46287_0` from emscripten-forge 6x |
 
 The clean test artifact hashes are:
 
-| Artifact | SHA-256 |
-| --- | --- |
-| `lldb-dap.js` | `5c5ba4d4943f519b04ca345d3110fe7b9e18cf783b554eedfb4e1608839f9cf9` |
+| Artifact        | SHA-256                                                            |
+| --------------- | ------------------------------------------------------------------ |
+| `lldb-dap.js`   | `5c5ba4d4943f519b04ca345d3110fe7b9e18cf783b554eedfb4e1608839f9cf9` |
 | `lldb-dap.wasm` | `8fffc68a209af6bffb8fcff109f17740bc7e2334783a98b2e955493460f2bfe6` |
-| pthread Worker | `f205167738aa5cca162f248ac4c916f7f14ad061cf6064493da58eb766549bc2` |
+| pthread Worker  | `f205167738aa5cca162f248ac4c916f7f14ad061cf6064493da58eb766549bc2` |
 
 The module uses Wasm exceptions, tail calls, `-pthread`, a 16-thread pool,
 512 MiB initial memory, and a 2 GiB maximum. Hosting requires COOP/COEP headers
@@ -151,6 +151,10 @@ clean source patch, tracing disabled, and no thread-selection workaround.
   objects and `total = 141`, stepped, and displayed `result = 282`.
 - nlohmann_json: displayed the parsed JSON object, `base = 35` and
   `bonus = 7`, stepped, and displayed `score = 42`.
+- xtl: stopped in `optional_score` and displayed `input = 13`.
+- Simple C: stopped in `main` and displayed `input = 17`.
+- Hand-written LLVM IR with DWARF metadata: stopped at `debug.ll:9` in
+  `ir_add` and displayed `left = 19` and `right = 23`.
 - Fresh-session soak: 20 out of 20 browser launches passed. The second ten
   mixed adjacent and distant breakpoints, stepping, Pause, iostream, xtensor,
   JSON, and the baseline flow.
@@ -164,6 +168,12 @@ The adapter was also exercised through the WasmBolt UI with the exact
 Emscripten 6.x `simple.wasm` acceptance artifact. The panel stopped at the
 gutter breakpoint, displayed locals and the call stack, stepped into `add`,
 stepped out, stepped over, and continued to exit with status 31.
+
+The debugger-only WasmBolt playground additionally passed an integrated
+breakpoint/frame/variable check for simple C, simple C++, iostream, xtl,
+xtensor, nlohmann_json, and LLVM IR. Each source was paired with its exact
+Emscripten 6.0.8 module through a byte-size and SHA-256 manifest; selecting the
+module attaches directly and avoids the legacy in-browser debug build path.
 
 By contrast, a debug module produced by the older WasmBolt Emscripten 4.0.9
 frontend plus its manually expanded link command could hit a breakpoint and
@@ -209,8 +219,8 @@ appear in the WAMR patch.
 - Test disconnect, same-Worker restart, invalid modules, failed breakpoint
   resolution, and replacement after a deliberately poisoned session.
 - Review the WAMR patch as a standalone upstream change and add native tests.
-- Finish the WasmBolt product integration around the proven Debugger panel,
-  including Terminal routing and automated browser coverage.
+- Promote the debugger playground's integrated browser matrix into committed
+  WasmBolt UI tests and finish Terminal-to-DAP breakpoint synchronization.
 - Move the WasmBolt compiler/debug-module build to the same compatible
   Emscripten 6.x toolchain validated with LLDB and WAMR.
 - Make Start Debugging use the simple compiler-driver command and attach to its

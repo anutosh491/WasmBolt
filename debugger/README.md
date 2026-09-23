@@ -40,6 +40,15 @@ bash scripts/60-build-test-guests.sh
 guest builds. They must point at extracted emscripten-forge package prefixes;
 third-party headers are never copied into this repository.
 
+To stage the source/module pairs for a local WasmBolt debugger playground:
+
+```bash
+node scripts/70-stage-playground.mjs /path/to/WasmBolt/workbench/compiler/debug-examples
+```
+
+The generated directory is intentionally ignored. Its manifest records the
+exact byte size and SHA-256 digest of every browser-loaded file.
+
 ## Verify
 
 The baseline flow is:
