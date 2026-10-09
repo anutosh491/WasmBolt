@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="Inspect, optimize, compile and run C, C++, MLIR and LLVM IR entirely in your browser." />
     <title>WasmBolt — The LLVM Project in your browser</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./ui/styles.css" />
   </head>
   <body>
     <header class="topbar">
@@ -110,7 +110,7 @@
       <div id="horizontal-resizer" class="resizer horizontal" title="Drag to resize"></div>
 
       <details id="advanced" class="advanced-pane">
-        <summary><span>Advanced terminal</span><small>run clang, mlir-opt, opt, llc, dot and wasm-ld directly</small></summary>
+        <summary><span>Advanced terminal</span><small>run clang, mlir-opt, mlir-translate, opt, llc, dot and wasm-ld</small></summary>
         <div class="advanced-content">
           <section id="runner" class="runner hidden">
             <label><span>Export</span><select id="symbol"></select></label>
@@ -131,7 +131,7 @@
               <pre id="log"></pre>
               <div class="command-line">
                 <span>wasmbolt %</span>
-                <input id="command" aria-label="Run an in-process command" placeholder="type a command" autocomplete="off" spellcheck="false" />
+                <input id="command" aria-label="Run a compiler or tool command" placeholder="type a command" autocomplete="off" spellcheck="false" />
                 <button id="run-command" disabled>Run</button>
               </div>
             </div>
@@ -145,6 +145,6 @@
       <span id="targets">Targets: loading…</span>
     </footer>
 
-    <script type="module" src="./app.js"></script>
+    <script type="module" src="./ui/app.js"></script>
   </body>
 </html>

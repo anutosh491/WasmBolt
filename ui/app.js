@@ -1,3 +1,7 @@
+import { examples } from "./examples.js";
+import { publicFunctionExports, displayFunctionExport, parseWasmFunctionSignatures } from "../runtime/exports.js";
+import { runTool, isToolCommand, workspaceFiles } from "../tools/client.js";
+
 const $ = (selector) => document.querySelector(selector);
 
 const elements = {
@@ -32,54 +36,6 @@ const elements = {
   runCommand: $("#run-command"),
 };
 
-const examples = {
-  cpp: `int sum_invariant(int N, int x) {
-  int out = 0;
-
-  for (int i = 0; i < N; ++i) {
-    int invariant = x * 3;
-    out += invariant;
-  }
-
-  return out > 0 ? out : 0;
-}`,
-  c: `int sum_invariant(int N, int x) {
-  int out = 0;
-
-  for (int i = 0; i < N; ++i) {
-    int invariant = x * 3;
-    out += invariant;
-  }
-
-  return out;
-}`,
-  mlir: `module {
-  func.func @matmul(%lhs: tensor<2x3xf32>, %rhs: tensor<3x2xf32>) -> tensor<2x2xf32> {
-    %zero = arith.constant 0.0 : f32
-    %empty = tensor.empty() : tensor<2x2xf32>
-    %initialized = linalg.fill ins(%zero : f32)
-      outs(%empty : tensor<2x2xf32>) -> tensor<2x2xf32>
-    %result = linalg.matmul
-      ins(%lhs, %rhs : tensor<2x3xf32>, tensor<3x2xf32>)
-      outs(%initialized : tensor<2x2xf32>) -> tensor<2x2xf32>
-    return %result : tensor<2x2xf32>
-  }
-}`,
-  llvm: `define i32 @absolute_difference(i32 %a, i32 %b) {
-entry:
-  %greater = icmp sgt i32 %a, %b
-  br i1 %greater, label %a_greater, label %b_greater
-
-a_greater:
-  %left = sub i32 %a, %b
-  ret i32 %left
-
-b_greater:
-  %right = sub i32 %b, %a
-  ret i32 %right
-}`,
-};
-
 const outputs = {
   ast: "",
   mlir: "Select MLIR and compile, or use mlir-opt from the advanced terminal.",
@@ -99,6 +55,7 @@ let activeStdoutCapture = null;
 let activeStderrCapture = null;
 let activeTab = "ir";
 let resourceDir = "/lib/clang/23";
+let runtimeTriple = "wasm32-unknown-emscripten";
 let currentModulePath = "";
 let buildNumber = 0;
 let busy = false;
@@ -106,36 +63,6 @@ let cfgObjectUrl = "";
 let wasmExportSignatures = new Map();
 let selectedSignature = null;
 let lastExecutionResult = null;
-let mlirDriverPromise = null;
-let mlirDriverReady = false;
-
-async function ensureMlirDriver({ background = false } = {}) {
-  if (!background && !mlirDriverReady)
-    setStatus("Preparing the MLIR optimizer…", "loading");
-  if (!mlirDriverPromise) {
-    mlirDriverPromise = (async () => {
-      const response = await fetch(new URL("./WasmBoltMlirOpt.so", import.meta.url));
-      if (!response.ok)
-        throw new Error(`Unable to download the MLIR optimizer (${response.status})`);
-      compiler.FS.mkdirTree("/lib");
-      compiler.FS.writeFile(
-        "/lib/WasmBoltMlirOpt.so",
-        new Uint8Array(await response.arrayBuffer()),
-      );
-      await compiler.loadDynamicLibrary("/lib/WasmBoltMlirOpt.so", {
-        loadAsync: true,
-        global: false,
-        nodelete: true,
-      });
-      mlirDriverReady = true;
-    })().catch((error) => {
-      mlirDriverPromise = null;
-      throw error;
-    });
-  }
-  await mlirDriverPromise;
-}
-
 function appendLog(line, kind = "out") {
   const text = String(line ?? "");
   const rendered = `${kind === "err" ? "[stderr] " : ""}${text}`;
@@ -174,6 +101,7 @@ function setBusy(value, message = "Working…") {
   for (const button of [elements.compile, elements.compileRun, elements.loadWasm, elements.runCommand])
     button.disabled = value || !compiler ||
       (button === elements.compileRun && elements.language.value === "mlir");
+  elements.execute.disabled = value || !selectedSignature || !currentModulePath;
   if (value) setStatus(message, "loading");
 }
 
@@ -233,100 +161,41 @@ function switchTab(tab) {
   elements.fileBrowser.classList.toggle("hidden", tab !== "files");
 }
 
-function renderCfg() {
-  for (const path of workspaceFiles()) {
+async function renderCfg() {
+  for (const path of workspaceFiles(compiler.FS)) {
     if (path.endsWith(".dot") || path === "/workspace/cfg.svg")
       removeIfPresent(path);
   }
-  run("opt -passes=dot-cfg -disable-output /workspace/optimized.ll");
-  const dotPath = workspaceFiles().find((path) => path.endsWith(".dot"));
+  await run("opt -passes=dot-cfg -disable-output /workspace/optimized.ll");
+  const dotPath = workspaceFiles(compiler.FS).find((path) => path.endsWith(".dot"));
   if (!dotPath) throw new Error("opt did not emit a CFG DOT file");
-  run(`dot -Tsvg ${dotPath} -o /workspace/cfg.svg`);
-  const svg = readText("/workspace/cfg.svg");
+  await renderDot(dotPath, "/workspace/cfg.svg", `LLVM CFG from ${dotPath}`);
+}
+
+async function renderMlirCfg() {
+  const dotPath = "/workspace/mlir-cfg.dot";
+  removeIfPresent(dotPath);
+  await run("mlir-opt --view-op-graph='print-data-flow-edges=false print-control-flow-edges=true' /workspace/optimized.mlir -o /dev/null",
+    { stderr: dotPath });
+  await renderDot(dotPath, "/workspace/mlir-cfg.svg", "MLIR operation graph with control-flow edges");
+}
+
+async function renderDot(dotPath, svgPath, description) {
+  removeIfPresent(svgPath);
+  await run(`dot -Tsvg ${dotPath} -o ${svgPath}`);
+  const svg = readText(svgPath);
   if (!svg) throw new Error("Graphviz did not render the CFG");
   if (cfgObjectUrl) URL.revokeObjectURL(cfgObjectUrl);
   cfgObjectUrl = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
   elements.cfgImage.src = cfgObjectUrl;
   elements.cfgImage.dataset.ready = "true";
-  outputs.cfg = `LLVM CFG from ${dotPath}, rendered in-process by Graphviz`;
-  refreshWorkspaceFiles("/workspace/cfg.svg");
-}
-
-function workspaceFiles() {
-  if (!compiler) return [];
-  return compiler.FS.readdir("/workspace")
-    .filter((name) => name !== "." && name !== "..")
-    .map((name) => `/workspace/${name}`)
-    .sort();
-}
-
-const llvmUtilityCommands = new Set([
-  "llvm-ar",
-  "llvm-bitcode-strip",
-  "llvm-c++filt",
-  "llvm-cxxfilt",
-  "llvm-dlltool",
-  "llvm-extract-bundle-entry",
-  "llvm-install-name-tool",
-  "llvm-lib",
-  "llvm-nm",
-  "llvm-objcopy",
-  "llvm-objdump",
-  "llvm-otool",
-  "llvm-ranlib",
-  "llvm-readelf",
-  "llvm-readobj",
-  "llvm-size",
-  "llvm-strip",
-]);
-
-function isLlvmUtilityCommand(command) {
-  return llvmUtilityCommands.has(command.trim().match(/^\S+/)?.[0]);
-}
-
-function runLlvmUtility(command) {
-  appendLog("");
-  appendLog(`$ ${command}`);
-
-  const files = workspaceFiles().map((path) => {
-    const bytes = compiler.FS.readFile(path).slice();
-    return { path, data: bytes.buffer };
-  });
-  const transfers = files.map((file) => file.data);
-
-  return new Promise((resolve, reject) => {
-    const worker = new Worker("./llvm-utility-worker.js", { type: "module" });
-    const finish = () => worker.terminate();
-
-    worker.onerror = (event) => {
-      finish();
-      reject(new Error(event.message || "LLVM utility Worker failed"));
-    };
-    worker.onmessage = ({ data }) => {
-      finish();
-      for (const file of data.generatedFiles || []) {
-        const parent = file.path.slice(0, file.path.lastIndexOf("/")) || "/";
-        compiler.FS.mkdirTree(parent);
-        compiler.FS.writeFile(file.path, new Uint8Array(file.data));
-      }
-      for (const line of data.stdout) appendLog(line);
-      for (const line of data.stderr) appendLog(line, "err");
-      if (!data.ok) {
-        reject(new Error(
-          data.stderr.at(-1) || data.error ||
-            `Command failed with exit code ${data.status}`,
-        ));
-        return;
-      }
-      resolve(data.stdout.join("\n"));
-    };
-
-    worker.postMessage({ id: 1, command, files }, transfers);
-  });
+  elements.cfgImage.alt = description;
+  outputs.cfg = `${description}, rendered by Graphviz in a Worker`;
+  refreshWorkspaceFiles(svgPath);
 }
 
 function refreshWorkspaceFiles(preferred = "") {
-  const files = workspaceFiles();
+  const files = workspaceFiles(compiler.FS);
   const previous = preferred || elements.fileSelect.value;
   elements.fileSelect.replaceChildren();
   for (const path of files) {
@@ -396,8 +265,8 @@ function commandOutputPath(command) {
 function commandText(settings, action, target = elements.target.value) {
   if (settings.llvmIr)
     throw new Error(`The ${action} action requires C or C++; LLVM IR starts after Clang`);
-  const compileTarget = action === "object" ? "wasm32-unknown-emscripten" : target;
-  const systemIncludes = compileTarget.startsWith("wasm32-") ? [
+  const compileTarget = action === "object" ? runtimeTriple : target;
+  const systemIncludes = compileTarget.startsWith("wasm") ? [
       "-isystem /include/wasm32-emscripten/c++/v1",
       "-isystem /include/c++/v1",
       `-isystem ${resourceDir}/include`,
@@ -411,11 +280,11 @@ function commandText(settings, action, target = elements.target.value) {
   if (action === "ir")
     return `${common} --target=${compileTarget} -O${elements.optimization.value} -Xclang -disable-O0-optnone -S -emit-llvm ${settings.filename} -o /workspace/source.ll`;
   if (action === "object")
-    return `${common} --target=wasm32-unknown-emscripten -fPIC -fwasm-exceptions -O${elements.optimization.value} -c ${settings.filename} -o /workspace/program.o`;
+    return `${common} --target=${runtimeTriple} -fPIC -fwasm-exceptions -O${elements.optimization.value} -c ${settings.filename} -o /workspace/program.o`;
   throw new Error(`Unknown action ${action}`);
 }
 
-function run(command, redirects = {}) {
+async function run(command, redirects = {}) {
   appendLog("");
   activeCapture = [];
   activeLogCapture = [];
@@ -427,7 +296,16 @@ function run(command, redirects = {}) {
   let capturedStdout;
   let capturedStderr;
   try {
-    code = compiler.ccall("run_command", "number", ["string"], [command]);
+    if (isToolCommand(command)) {
+      appendLog(`$ ${command}`);
+      const result = await runTool(command, compiler.FS);
+      for (const line of result.stdout) appendLog(line);
+      for (const line of result.stderr) appendLog(line, "err");
+      if (result.error && !result.stderr.length) appendLog(result.error, "err");
+      code = result.status;
+    } else {
+      code = compiler.ccall("run_command", "number", ["string"], [command]);
+    }
     captured = activeCapture.join("\n");
   } finally {
     capturedLog = activeLogCapture.join("\n");
@@ -466,28 +344,28 @@ function parseCommandRedirections(command) {
   return { command: executable.trim(), redirects };
 }
 
-function emitIr(settings, target) {
+async function emitIr(settings, target) {
   removeIfPresent("/workspace/source.ll");
   if (settings.llvmIr)
     compiler.FS.writeFile("/workspace/source.ll", elements.source.value);
   else
-    run(commandText(settings, "ir", target));
+    await run(commandText(settings, "ir", target));
   outputs.ir = readText("/workspace/source.ll");
   return outputs.ir;
 }
 
-function optimizeIr() {
+async function optimizeIr() {
   removeIfPresent("/workspace/optimized.ll");
   const command = `opt -S -passes=default<O${elements.optimization.value}> /workspace/source.ll -o /workspace/optimized.ll`;
-  run(command);
+  await run(command);
   outputs.optimized = readText("/workspace/optimized.ll");
   return outputs.optimized;
 }
 
-function emitAssembly() {
+async function emitAssembly() {
   removeIfPresent("/workspace/output.s");
   const command = `llc -mtriple=${elements.target.value} -filetype=asm -O${elements.optimization.value} /workspace/optimized.ll -o /workspace/output.s`;
-  run(command);
+  await run(command);
   outputs.assembly = readText("/workspace/output.s");
   return outputs.assembly;
 }
@@ -495,23 +373,23 @@ function emitAssembly() {
 async function compileSelectedOutput() {
   if (busy) return;
   let stage = activeTab === "wasm" || activeTab === "files" ? "ir" : activeTab;
-  if (elements.language.value === "mlir") stage = "mlir";
+  if (elements.language.value === "mlir" && stage !== "cfg") stage = "mlir";
   setBusy(true, `Compiling ${stage === "cfg" ? "control-flow graph" : stage}…`);
   try {
     const settings = writeSource();
     if (settings.mlir) {
-      await ensureMlirDriver();
       removeIfPresent("/workspace/optimized.mlir");
-      run("mlir-opt --pass-pipeline=builtin.module(canonicalize,cse) /workspace/input.mlir -o /workspace/optimized.mlir");
+      await run("mlir-opt --pass-pipeline=builtin.module(canonicalize,cse) /workspace/input.mlir -o /workspace/optimized.mlir");
       outputs.mlir = readText("/workspace/optimized.mlir");
+      if (stage === "cfg") await renderMlirCfg();
     } else if (stage === "ast") {
       if (settings.llvmIr) throw new Error("Clang AST is not applicable to LLVM IR input");
-      outputs.ast = run(commandText(settings, "ast"));
+      outputs.ast = await run(commandText(settings, "ast"));
     } else {
-      emitIr(settings, elements.target.value);
-      if (stage === "optimized" || stage === "cfg" || stage === "assembly") optimizeIr();
-      if (stage === "cfg") renderCfg();
-      if (stage === "assembly") emitAssembly();
+      await emitIr(settings, elements.target.value);
+      if (stage === "optimized" || stage === "cfg" || stage === "assembly") await optimizeIr();
+      if (stage === "cfg") await renderCfg();
+      if (stage === "assembly") await emitAssembly();
     }
     switchTab(stage);
     refreshWorkspaceFiles();
@@ -526,83 +404,6 @@ async function compileSelectedOutput() {
   } finally {
     setBusy(false);
   }
-}
-
-function publicFunctionExports(exports) {
-  const hidden = new Set(["__wasm_call_ctors", "__wasm_apply_data_relocs", "__dso_handle"]);
-  return exports
-    .filter((entry) => entry.kind === "function" && !hidden.has(entry.name) &&
-      (!entry.name.startsWith("_") || /^_Z\d/.test(entry.name)))
-    .map((entry) => entry.name);
-}
-
-function displayFunctionExport(name) {
-  const match = name.match(/^_Z(\d+)/);
-  if (!match) return name;
-  const start = match[0].length;
-  const length = Number(match[1]);
-  const sourceName = name.slice(start, start + length);
-  return sourceName ? `${sourceName} (C++: ${name})` : name;
-}
-
-function parseWasmFunctionSignatures(bytes) {
-  let offset = 8;
-  const types = [];
-  const importedTypes = [];
-  const definedTypes = [];
-  const exportedFunctions = new Map();
-  const valueTypes = new Map([[0x7f, "i32"], [0x7e, "i64"], [0x7d, "f32"], [0x7c, "f64"], [0x70, "funcref"], [0x6f, "externref"]]);
-  const uleb = () => {
-    let value = 0, shift = 0, byte;
-    do { byte = bytes[offset++]; value += (byte & 0x7f) * (2 ** shift); shift += 7; } while (byte & 0x80);
-    return value;
-  };
-  const name = () => { const size = uleb(); const value = new TextDecoder().decode(bytes.subarray(offset, offset + size)); offset += size; return value; };
-  const limits = () => { const flags = uleb(); uleb(); if (flags & 1) uleb(); };
-  const vector = (read) => { const count = uleb(); return Array.from({ length: count }, read); };
-
-  while (offset < bytes.length) {
-    const id = bytes[offset++];
-    const size = uleb();
-    const end = offset + size;
-    if (id === 1) {
-      for (const _ of vector(() => 0)) {
-        if (bytes[offset++] !== 0x60) throw new Error("Unsupported Wasm function type");
-        const params = vector(() => valueTypes.get(bytes[offset++]) || "?");
-        const results = vector(() => valueTypes.get(bytes[offset++]) || "?");
-        types.push({ params, results });
-      }
-    } else if (id === 2) {
-      for (const _ of vector(() => 0)) {
-        name(); name();
-        const kind = bytes[offset++];
-        if (kind === 0) importedTypes.push(uleb());
-        else if (kind === 1) { offset++; limits(); }
-        else if (kind === 2) limits();
-        else if (kind === 3) offset += 2;
-        else if (kind === 4) { uleb(); uleb(); }
-        else throw new Error(`Unsupported Wasm import kind ${kind}`);
-      }
-    } else if (id === 3) {
-      definedTypes.push(...vector(() => uleb()));
-    } else if (id === 7) {
-      for (const _ of vector(() => 0)) {
-        const exportName = name();
-        const kind = bytes[offset++];
-        const index = uleb();
-        if (kind === 0) exportedFunctions.set(exportName, index);
-      }
-    }
-    offset = end;
-  }
-
-  const signatures = new Map();
-  for (const [exportName, index] of exportedFunctions) {
-    const typeIndex = index < importedTypes.length ? importedTypes[index] : definedTypes[index - importedTypes.length];
-    const type = types[typeIndex];
-    if (type) signatures.set(exportName, `${type.results[0] || "void"}(${type.params.join(", ")})`);
-  }
-  return signatures;
 }
 
 async function inspectWasm(path) {
@@ -647,7 +448,7 @@ async function activateWasm(path) {
 async function loadExistingWasm() {
   if (busy) return;
   const selected = elements.fileSelect.value || "";
-  const wasmFiles = workspaceFiles().filter((path) => path.endsWith(".wasm"));
+  const wasmFiles = workspaceFiles(compiler.FS).filter((path) => path.endsWith(".wasm"));
   const path = selected.endsWith(".wasm") ? selected : wasmFiles.at(-1);
   if (!path) {
     setStatus("No .wasm file exists in /workspace", "error");
@@ -679,9 +480,9 @@ async function compileAndRun() {
     const settings = writeSource();
     removeIfPresent("/workspace/program.o");
     if (settings.llvmIr) {
-      run(`llc -mtriple=wasm32-unknown-emscripten -filetype=obj -relocation-model=pic -O2 ${settings.filename} -o /workspace/program.o`);
+      await run(`llc -mtriple=${runtimeTriple} -filetype=obj -relocation-model=pic -O2 ${settings.filename} -o /workspace/program.o`);
     } else {
-      run(commandText(settings, "object"));
+      await run(commandText(settings, "object"));
     }
 
     currentModulePath = `/workspace/program-${++buildNumber}.wasm`;
@@ -690,7 +491,7 @@ async function compileAndRun() {
       "--unresolved-symbols=import-dynamic", "/workspace/program.o",
       "-o", currentModulePath,
     ].filter(Boolean).join(" ");
-    run(link);
+    await run(link);
     await activateWasm(currentModulePath);
     if (elements.symbol.value && wasmExportSignatures.has(elements.symbol.value)) executeSymbol();
   } catch (error) {
@@ -759,8 +560,8 @@ function configureSelectedSymbol() {
     ["void()", { code: 6, argumentsCount: 0 }],
   ]);
   const detected = wasmExportSignatures.get(name);
-  const entryPoint = name === "main" && detected === "i32(i32, i32)";
-  const callable = callableSignatures.get(detected);
+  const entryPoint = name === "main" && /^i32\(i32, i(?:32|64)\)$/.test(detected);
+  const callable = entryPoint ? { code: 7, argumentsCount: 0 } : callableSignatures.get(detected);
   selectedSignature = callable
     ? { ...callable, argumentsCount: entryPoint ? 0 : callable.argumentsCount, entryPoint }
     : null;
@@ -768,7 +569,7 @@ function configureSelectedSymbol() {
   elements.signature.title = entryPoint
     ? "Emscripten lowers main to the argc/argv WebAssembly entry-point ABI"
     : detected ? "Read from the Wasm type section" : "No Wasm function type was found";
-  elements.execute.disabled = !selectedSignature;
+  elements.execute.disabled = busy || !selectedSignature;
   elements.execute.title = detected && !selectedSignature
     ? `Execution is not yet supported for ${detected}`
     : "";
@@ -870,7 +671,7 @@ function configureResizers() {
   const vertical = $("#vertical-resizer");
   const horizontal = $("#horizontal-resizer");
   const advanced = $("#advanced");
-  let expandedHeight = 160;
+  let expandedHeight = 260;
 
   const setAdvancedHeight = (height) => {
     expandedHeight = height;
@@ -879,6 +680,10 @@ function configureResizers() {
 
   advanced.addEventListener("toggle", () => {
     workspace.style.setProperty("--console-height", advanced.open ? `${expandedHeight}px` : "38px");
+    if (advanced.open) requestAnimationFrame(() => {
+      const terminal = $("#terminal-scroll");
+      terminal.scrollTop = terminal.scrollHeight;
+    });
   });
   workspace.style.setProperty("--console-height", advanced.open ? `${expandedHeight}px` : "38px");
 
@@ -897,7 +702,7 @@ function configureResizers() {
         const percent = Math.max(24, Math.min(76, ((moveEvent.clientX - bounds.left) / bounds.width) * 100));
         document.documentElement.style.setProperty("--source-width", `${percent}%`);
       } else {
-        const height = Math.max(110, Math.min(bounds.height - 260, bounds.bottom - moveEvent.clientY));
+        const height = Math.max(220, Math.min(bounds.height - 260, bounds.bottom - moveEvent.clientY));
         setAdvancedHeight(height);
       }
     };
@@ -953,15 +758,11 @@ function wireUi() {
       // command works immediately after a fresh page load.
       writeSource();
       const parsed = parseCommandRedirections(command);
-      if (/^mlir-opt(?:\s|$)/.test(parsed.command))
-        await ensureMlirDriver();
-      const captured = isLlvmUtilityCommand(parsed.command)
-        ? await runLlvmUtility(parsed.command)
-        : run(parsed.command, parsed.redirects);
+      const captured = await run(parsed.command, parsed.redirects);
       const outputPath = parsed.redirects.stderr ||
         commandOutputPath(parsed.command);
       refreshWorkspaceFiles(outputPath);
-      if (outputPath && outputPath !== "-" && workspaceFiles().includes(outputPath))
+      if (outputPath && outputPath !== "-" && workspaceFiles(compiler.FS).includes(outputPath))
         openWorkspaceFile(outputPath);
       else if (captured.trim()) {
         outputs.analysis = captured;
@@ -969,7 +770,7 @@ function wireUi() {
       }
       setStatus("Compiler ready");
     }
-    catch (error) { appendLog(error.message, "err"); }
+    catch (error) { appendLog(error.message, "err"); setStatus("Command failed", "error"); }
     finally {
       setBusy(false);
       elements.command.focus();
@@ -995,9 +796,9 @@ function wireUi() {
 async function loadCompiler() {
   try {
     setStatus("Downloading Clang and LLVM…", "loading");
-    const { default: createCompiler } = await import("./Compiler.js");
+    const { default: createCompiler } = await import("../runtime/Compiler.js");
     compiler = await createCompiler({
-      locateFile: (path) => new URL(path, import.meta.url).href,
+      locateFile: (path) => new URL(`../runtime/${path}`, import.meta.url).href,
       print: (line) => appendLog(line),
       printErr: (line) => appendLog(line, "err"),
       setStatus: (text) => { if (text) setStatus(text, "loading"); },
@@ -1010,11 +811,19 @@ async function loadCompiler() {
     const targets = compiler.ccall("available_targets", "string", [], []).split(",").filter(Boolean);
     const major = version.match(/LLVM (\d+)/)?.[1];
     if (major) resourceDir = `/lib/clang/${major}`;
-    elements.version.textContent = version;
+    const bits = compiler.ccall("wasmbolt_pointer_bits", "number", [], []);
+    runtimeTriple = `wasm${bits}-unknown-emscripten`;
+    document.body.dataset.runtimeArch = `wasm${bits}`;
+    const wasmOption = elements.target.querySelector('option[value^="wasm"]');
+    const wasSelected = wasmOption.selected;
+    wasmOption.value = runtimeTriple;
+    wasmOption.textContent = `WebAssembly ${bits}`;
+    if (wasSelected) elements.target.value = runtimeTriple;
+    elements.version.textContent = `${version} · wasm${bits}`;
     elements.targets.textContent = `Backends: ${targets.join(", ")}`;
 
     const support = {
-      "wasm32-unknown-emscripten": targets.some((name) => name.toLowerCase().includes("wasm")),
+      [runtimeTriple]: targets.some((name) => name.toLowerCase().includes("wasm")),
       "x86_64-unknown-linux-gnu": targets.some((name) => name.toLowerCase().includes("x86")),
       "aarch64-unknown-linux-gnu": targets.some((name) => name.toLowerCase().includes("aarch64")),
     };
@@ -1023,7 +832,7 @@ async function loadCompiler() {
       if (option.disabled) option.textContent += " (backend not packaged)";
     }
     if (elements.target.selectedOptions[0]?.disabled)
-      elements.target.value = "wasm32-unknown-emscripten";
+      elements.target.value = runtimeTriple;
 
     elements.log.textContent = "";
     setBusy(false);
@@ -1031,11 +840,11 @@ async function loadCompiler() {
     const autorun = new URLSearchParams(location.search).get("autorun");
     if (autorun === "1" || autorun === "driver") {
       const settings = writeSource();
-      outputs.ast = settings.llvmIr ? "LLVM IR input starts after the Clang AST stage." : run(commandText(settings, "ast"));
-      emitIr(settings, elements.target.value);
-      optimizeIr();
-      renderCfg();
-      emitAssembly();
+      outputs.ast = settings.llvmIr ? "LLVM IR input starts after the Clang AST stage." : await run(commandText(settings, "ast"));
+      await emitIr(settings, elements.target.value);
+      await optimizeIr();
+      await renderCfg();
+      await emitAssembly();
       await compileAndRun();
       if (autorun === "driver") await loadExistingWasm();
       executeSymbol();
@@ -1044,13 +853,13 @@ async function loadCompiler() {
         ? outputs.ir.includes("define i32 @absolute_difference")
         : outputs.ast.includes("FunctionDecl");
       const selectionDag = llvmIrInput
-        ? run("llc -mtriple=wasm32-unknown-unknown -mattr=+simd128 -O2 -stop-after=finalize-isel -o - /workspace/input.ll")
+        ? await run("llc -mtriple=wasm32-unknown-unknown -mattr=+simd128 -O2 -stop-after=finalize-isel -o - /workspace/input.ll")
         : "";
       let driverReady = true;
       if (autorun === "driver" && llvmIrInput) {
-        run("llc -mtriple=wasm32-unknown-unknown -mattr=+simd128 -O2 -stop-before=finalize-isel -o /workspace/before-isel.mir /workspace/input.ll");
-        run("llc -mtriple=wasm32-unknown-emscripten -O1 -filetype=asm -o /workspace/output-emscripten.s /workspace/input.ll");
-        run("llc -mtriple=wasm32-unknown-unknown -O3 -filetype=asm -o /workspace/output-wasm.s /workspace/input.ll");
+        await run("llc -mtriple=wasm32-unknown-unknown -mattr=+simd128 -O2 -stop-before=finalize-isel -o /workspace/before-isel.mir /workspace/input.ll");
+        await run("llc -mtriple=wasm32-unknown-emscripten -O1 -filetype=asm -o /workspace/output-emscripten.s /workspace/input.ll");
+        await run("llc -mtriple=wasm32-unknown-unknown -O3 -filetype=asm -o /workspace/output-wasm.s /workspace/input.ll");
         driverReady = readText("/workspace/before-isel.mir").includes("name:            absolute_difference") &&
           readText("/workspace/output-emscripten.s").includes("absolute_difference") &&
           readText("/workspace/output-wasm.s").includes("absolute_difference");
@@ -1066,14 +875,6 @@ async function loadCompiler() {
         document.body.dataset.smokeTest = "passed";
     }
 
-    // MLIR is always available, but its large driver should not delay the
-    // first Clang/LLVM interaction. Warm it transparently once the browser is
-    // otherwise idle; a foreground MLIR command awaits the same promise.
-    const warmMlir = () => ensureMlirDriver({ background: true }).catch(() => {});
-    if ("requestIdleCallback" in window)
-      window.requestIdleCallback(warmMlir, { timeout: 5000 });
-    else
-      window.setTimeout(warmMlir, 1000);
   } catch (error) {
     appendLog(error.stack || error.message, "err");
     setStatus("Compiler failed to load", "error");

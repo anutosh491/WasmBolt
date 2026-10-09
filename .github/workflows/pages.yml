@@ -22,15 +22,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Check out the matching LLVM driver sources
-        uses: actions/checkout@v6
-        with:
-          repository: llvm/llvm-project
-          ref: llvmorg-23.1.0
-          path: llvm-project
-          sparse-checkout: |
-            llvm/tools/llc
-
       - name: Install the Emscripten build environment
         uses: mamba-org/setup-micromamba@v2
         with:
@@ -38,7 +29,7 @@ jobs:
           environment-name: wasmbolt-wasm-build
           init-shell: bash
 
-      - name: Install the WebAssembly LLVM target packages
+      - name: Install target packages
         shell: bash -l {0}
         run: |
           micromamba create -y \
@@ -48,12 +39,12 @@ jobs:
 
       - name: Build WasmBolt
         shell: bash -l {0}
+        env:
+          WASMBOLT_ARCH: wasm32
         run: |
           set -euo pipefail
           export LLVM_WASM_PREFIX="${MAMBA_ROOT_PREFIX}/envs/wasmbolt-wasm-host"
           export EMSCRIPTEN_SYSROOT="${CONDA_PREFIX}/opt/emsdk/upstream/emscripten/cache/sysroot"
-          export CLANG_RESOURCE_TREE="${LLVM_WASM_PREFIX}/lib/clang/23"
-          export LLVM_SOURCE_TREE="${GITHUB_WORKSPACE}/llvm-project"
           bash scripts/build.sh
 
       - name: Verify deployment artifacts
@@ -61,20 +52,18 @@ jobs:
         run: |
           set -euo pipefail
           test -s site/index.html
-          test -s site/app.js
-          test -s site/Compiler.js
-          test -s site/Compiler.wasm
-          test -s site/Compiler.data
-          test -s site/WasmBoltMlirOpt.so
-          test -s site/llvm.js
-          test -s site/llvm.wasm
+          test -s site/ui/app.js
+          test -s site/ui/styles.css
+          test -s site/runtime/Compiler.js
+          test -s site/runtime/Compiler.wasm
+          test -s site/runtime/Compiler.data
+          test -s site/tools/worker.js
+          for tool in opt llc llvm-ar llvm-cxxfilt llvm-nm llvm-objcopy \
+                      llvm-objdump llvm-readobj llvm-size mlir-opt mlir-translate dot; do
+            test -s "site/tools/${tool}.js"
+            test -s "site/tools/${tool}.wasm"
+          done
           grep -q 'WasmBolt' site/index.html
-          du -h site/Compiler.js site/Compiler.wasm site/Compiler.data \
-            site/WasmBoltMlirOpt.so site/llvm.js site/llvm.wasm
-          if grep -q 'WasmBoltMlirOpt.so' site/Compiler.js; then
-            echo "The MLIR driver was accidentally added back to the core preload" >&2
-            exit 1
-          fi
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
