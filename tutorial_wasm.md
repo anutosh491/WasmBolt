@@ -5,6 +5,10 @@ command at a time. A command that writes a file automatically selects that file
 in the browser filesystem. Do not refresh until the current pipeline is
 complete because `/workspace` belongs to the current browser session.
 
+Commands below target wasm32. On a wasm64 deployment, replace
+`wasm32-unknown-emscripten` with `wasm64-unknown-emscripten` when building
+modules to load into WasmBolt. The compiler and loaded module must share an ABI.
+
 ## 1. C++ to WebAssembly
 
 Select **C++23**, press **Reset**, and keep the resulting `snippet.cpp`.
@@ -126,7 +130,7 @@ result is `1`.
 
 ## 3. Boost.cpp to WebAssembly
 
-First add `boost-cpp` to `environment-wasm-host.yml` and rebuild WasmBolt.
+Uncomment `boost-cpp` in `environment-wasm-host.yml` and rebuild WasmBolt.
 
 Select **C++23** and replace the editor with:
 
@@ -162,7 +166,10 @@ result is π: approximately `3.141592653589793`.
 
 ## 4. SymEngine expansion and LaTeX output
 
-First add `symengine` to `environment-wasm-host.yml` and rebuild WasmBolt.
+Uncomment `symengine` in `environment-wasm-host.yml` using a compatible package.
+Set `WASMBOLT_RUNTIME_LIBRARIES` to the absolute paths of its runtime libraries
+(semicolon-separated) and rebuild WasmBolt. Compiler development libraries
+are deliberately excluded from the browser preload.
 
 Refresh, select **C++23**, and replace the editor with:
 
