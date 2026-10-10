@@ -54,6 +54,8 @@ let activeLogCapture = null;
 let activeStdoutCapture = null;
 let activeStderrCapture = null;
 let activeTab = "ir";
+let sourcePath = "";
+const sourceBreakpoints = new Map();
 let resourceDir = "/lib/clang/23";
 let runtimeTriple = "wasm32-unknown-emscripten";
 let currentModulePath = "";
@@ -102,6 +104,7 @@ function setBusy(value, message = "Working…") {
     button.disabled = value || !compiler ||
       (button === elements.compileRun && elements.language.value === "mlir");
   elements.execute.disabled = value || !selectedSignature || !currentModulePath;
+  $("#new-file").disabled = value || !compiler;
   if (value) setStatus(message, "loading");
 }
 
@@ -109,7 +112,7 @@ function languageSettings() {
   if (elements.language.value === "mlir") {
     return {
       driver: "mlir-opt",
-      filename: "/workspace/input.mlir",
+      filename: sourcePath || "/workspace/input.mlir",
       label: "input.mlir",
       standard: "",
       x: "",
@@ -119,7 +122,7 @@ function languageSettings() {
   if (elements.language.value === "llvm") {
     return {
       driver: "",
-      filename: "/workspace/input.ll",
+      filename: sourcePath || "/workspace/input.ll",
       label: "input.ll",
       standard: "",
       x: "",
@@ -129,7 +132,7 @@ function languageSettings() {
   const cpp = elements.language.value === "cpp";
   return {
     driver: cpp ? "clang++" : "clang",
-    filename: cpp ? "/workspace/snippet.cpp" : "/workspace/snippet.c",
+    filename: sourcePath || (cpp ? "/workspace/snippet.cpp" : "/workspace/snippet.c"),
     label: cpp ? "snippet.cpp" : "snippet.c",
     standard: cpp ? "-std=c++23" : "-std=c23",
     x: cpp ? "c++" : "c",
@@ -138,6 +141,8 @@ function languageSettings() {
 
 function writeSource() {
   const settings = languageSettings();
+  elements.filename.textContent = settings.filename.replace("/workspace/", "");
+  compiler.FS.mkdirTree(settings.filename.slice(0, settings.filename.lastIndexOf("/")));
   compiler.FS.writeFile(settings.filename, elements.source.value);
   refreshWorkspaceFiles(settings.filename);
   return settings;
@@ -212,6 +217,64 @@ function refreshWorkspaceFiles(preferred = "") {
       }).join("\n")
     : "The browser filesystem is empty.";
   if (activeTab === "files") elements.output.textContent = outputs.files;
+  renderExplorer(files);
+}
+
+function renderSourceGutter() {
+  const path = languageSettings().filename;
+  const lines = sourceBreakpoints.get(path) || new Set();
+  sourceBreakpoints.set(path, lines);
+  const count = elements.source.value.split("\n").length;
+  for (const line of lines) if (line > count) lines.delete(line);
+  $("#source-gutter").replaceChildren(...Array.from({ length: count }, (_, index) => {
+    const line = index + 1;
+    const button = document.createElement("button");
+    button.textContent = String(line);
+    button.dataset.line = line;
+    button.setAttribute("aria-label", `Breakpoint at line ${line}`);
+    button.setAttribute("aria-pressed", String(lines.has(line)));
+    button.addEventListener("click", () => {
+      if (lines.has(line)) lines.delete(line); else lines.add(line);
+      button.setAttribute("aria-pressed", String(lines.has(line)));
+    });
+    return button;
+  }));
+  $("#source-gutter").scrollTop = elements.source.scrollTop;
+}
+
+function renderExplorer(files) {
+  $("#workspace-files").replaceChildren(...files.map((path) => {
+    const button = document.createElement("button");
+    button.textContent = path.replace("/workspace/", "");
+    button.title = path;
+    const extension = path.split(".").pop().toLowerCase();
+    button.dataset.kind = ({ c: "C", cc: "C++", cpp: "C++", cxx: "C++", ll: "IR", mlir: "ML", wasm: "W" })[extension] || "·";
+    button.setAttribute("aria-current", String(path === languageSettings().filename));
+    button.addEventListener("click", () => editWorkspaceFile(path));
+    return button;
+  }));
+}
+
+function editWorkspaceFile(path) {
+  if (!compiler || busy) return;
+  const language = /\.c$/i.test(path) ? "c" : /\.(cc|cpp|cxx)$/i.test(path) ? "cpp"
+    : /\.ll$/i.test(path) ? "llvm" : /\.mlir$/i.test(path) ? "mlir" : "";
+  if (!language) { toggleDebugger(false); openWorkspaceFile(path); return; }
+  // Save the editor before switching files, including edits never compiled.
+  writeSource();
+  sourcePath = path;
+  elements.language.value = language;
+  elements.source.value = readText(path);
+  elements.source.dispatchEvent(new Event("input"));
+  elements.filename.textContent = path.replace("/workspace/", "");
+  refreshWorkspaceFiles(path);
+  updateLanguageUi();
+}
+
+function toggleDebugger(visible) {
+  $("#debugger-panel").classList.toggle("hidden", !visible);
+  $(".output-pane").classList.toggle("hidden", visible);
+  $("#toggle-debugger").setAttribute("aria-expanded", String(visible));
 }
 
 function isTextFile(path) {
@@ -577,6 +640,7 @@ function configureSelectedSymbol() {
 }
 
 function resetSource() {
+  sourcePath = "";
   const language = elements.language.value;
   elements.source.value = examples[language];
   elements.filename.textContent = languageSettings().label;
@@ -587,6 +651,8 @@ function resetSource() {
   elements.runner.classList.add("hidden");
   saveState();
   updateLanguageUi();
+  if (compiler) writeSource();
+  renderSourceGutter();
 }
 
 function updateLanguageUi() {
@@ -608,6 +674,7 @@ function updateLanguageUi() {
 function serializableState() {
   return {
     source: elements.source.value,
+    sourcePath,
     language: elements.language.value,
     optimization: elements.optimization.value,
     target: elements.target.value,
@@ -631,8 +698,9 @@ function decodeState(encoded) {
 function applyState(state) {
   for (const key of ["language", "optimization", "target"])
     if (state[key] && elements[key]) elements[key].value = state[key];
+  if (/^\/workspace\/[\w./-]+$/.test(state.sourcePath || "") && !state.sourcePath.split("/").includes("..")) sourcePath = state.sourcePath;
   if (typeof state.source === "string") elements.source.value = state.source;
-  elements.filename.textContent = languageSettings().label;
+  elements.filename.textContent = languageSettings().filename.replace("/workspace/", "");
 }
 
 function saveState() {
@@ -699,8 +767,8 @@ function configureResizers() {
     const move = (moveEvent) => {
       const bounds = workspace.getBoundingClientRect();
       if (orientation === "vertical") {
-        const percent = Math.max(24, Math.min(76, ((moveEvent.clientX - bounds.left) / bounds.width) * 100));
-        document.documentElement.style.setProperty("--source-width", `${percent}%`);
+        const percent = Math.max(24, Math.min(76, ((moveEvent.clientX - $(".source-pane").getBoundingClientRect().left) / (bounds.width - $(".explorer").getBoundingClientRect().width)) * 100));
+        document.documentElement.style.setProperty("--source-ratio", String(percent / 100));
       } else {
         const height = Math.max(220, Math.min(bounds.height - 260, bounds.bottom - moveEvent.clientY));
         setAdvancedHeight(height);
@@ -724,6 +792,20 @@ function configureResizers() {
 }
 
 function wireUi() {
+  renderSourceGutter();
+  elements.source.addEventListener("scroll", () => { $("#source-gutter").scrollTop = elements.source.scrollTop; });
+  $("#toggle-debugger").addEventListener("click", () => toggleDebugger($("#toggle-debugger").getAttribute("aria-expanded") !== "true"));
+  $("#close-debugger").addEventListener("click", () => toggleDebugger(false));
+  $("#new-file").addEventListener("click", () => {
+    if (!compiler || busy) return;
+    const name = prompt("Source filename (.c, .cpp, .ll or .mlir)", "simple.cpp");
+    if (name === null) return;
+    if (!/^[\w-]+\.(c|cc|cpp|cxx|ll|mlir)$/i.test(name)) { alert("Use a source filename with letters, digits, hyphens or underscores."); return; }
+    const path = `/workspace/${name}`;
+    if (workspaceFiles(compiler.FS).includes(path)) { editWorkspaceFile(path); return; }
+    compiler.FS.writeFile(path, "");
+    editWorkspaceFile(path);
+  });
   document.querySelectorAll("#tabs button").forEach((button) =>
     button.addEventListener("click", () => switchTab(button.dataset.tab)));
   elements.compile.addEventListener("click", compileSelectedOutput);
@@ -740,6 +822,7 @@ function wireUi() {
     lastExecutionResult = null;
     elements.runner.classList.add("hidden");
     saveState();
+    renderSourceGutter();
   });
   $("#clear-source").addEventListener("click", () => { elements.source.value = ""; elements.source.dispatchEvent(new Event("input")); elements.source.focus(); });
   $("#reset-source").addEventListener("click", resetSource);

@@ -8,6 +8,18 @@
     <link rel="stylesheet" href="./ui/styles.css" />
   </head>
   <body>
+    <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <symbol id="icon-bug" viewBox="0 0 24 24"><path d="M8 8V6a4 4 0 0 1 8 0v2M8 8h8v6a4 4 0 0 1-8 0V8ZM5 11h3m8 0h3M5 16l3-1m8 0 3 1M6 5l2 2m8 0 2-2M12 8v10" /></symbol>
+      <symbol id="icon-play" viewBox="0 0 24 24"><path d="m7 4 13 8-13 8Z" /></symbol>
+      <symbol id="icon-step-over" viewBox="0 0 24 24"><path d="M5 9a7 7 0 0 1 13-1M18 4v5h-5M12 14v5m-3-3 3 3 3-3" /></symbol>
+      <symbol id="icon-step-in" viewBox="0 0 24 24"><path d="M12 3v12m-4-4 4 4 4-4M5 20h14" /></symbol>
+      <symbol id="icon-step-out" viewBox="0 0 24 24"><path d="M12 17V5m-4 4 4-4 4 4M5 21h14" /></symbol>
+      <symbol id="icon-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14" /></symbol>
+      <symbol id="icon-restart" viewBox="0 0 24 24"><path d="M20 9a8 8 0 1 0 1 6M20 3v6h-6" /></symbol>
+      <symbol id="icon-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1" /></symbol>
+      <symbol id="icon-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></symbol>
+      <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
+    </svg>
     <header class="topbar">
       <div class="brand">
         <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
@@ -57,10 +69,17 @@
       <div class="primary-actions">
         <button id="compile" class="primary" disabled>Compile</button>
         <button id="compile-run" class="accent" disabled>Compile &amp; Run</button>
+        <button id="toggle-debugger" class="quiet" aria-label="Toggle debugger" aria-controls="debugger-panel" aria-expanded="false" title="Debugger"><svg class="ui-icon" aria-hidden="true"><use href="#icon-bug"></use></svg></button>
       </div>
     </section>
 
     <main id="workspace" class="workspace">
+      <aside class="explorer" aria-label="Workspace files">
+        <div class="pane-title"><strong>Explorer</strong><button id="new-file" class="quiet" disabled title="New source file" aria-label="New source file"><svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg></button></div>
+        <div class="workspace-root">workspace</div>
+        <div id="workspace-files" class="workspace-files"></div>
+      </aside>
+
       <section class="pane source-pane">
         <div class="pane-title">
           <div>
@@ -72,7 +91,10 @@
             <button id="reset-source" class="quiet">Reset</button>
           </div>
         </div>
-        <textarea id="source" spellcheck="false" aria-label="Source code"></textarea>
+        <div class="source-editor">
+          <div id="source-gutter" class="source-gutter" aria-label="Source breakpoints"></div>
+          <textarea id="source" spellcheck="false" aria-label="Source code" wrap="off"></textarea>
+        </div>
       </section>
 
       <div id="vertical-resizer" class="resizer vertical" title="Drag to resize"></div>
@@ -105,6 +127,26 @@
           <button id="download-file" class="quiet">Download</button>
         </div>
 
+      </section>
+
+      <section id="debugger-panel" class="pane debugger-pane hidden" aria-label="Debugger">
+        <div class="pane-title"><strong>Debugger</strong><button id="close-debugger" class="quiet" aria-label="Close debugger panel" title="Close debugger panel"><svg class="ui-icon" aria-hidden="true"><use href="#icon-close"></use></svg></button></div>
+        <div class="debugger-actions" aria-label="Debugger controls">
+          <button id="debugger-start" disabled>Start</button>
+          <button id="debugger-continue" disabled title="Continue" aria-label="Continue"><svg class="ui-icon" aria-hidden="true"><use href="#icon-play"></use></svg></button>
+          <button id="debugger-step-over" disabled title="Step over" aria-label="Step over"><svg class="ui-icon" aria-hidden="true"><use href="#icon-step-over"></use></svg></button>
+          <button id="debugger-step-in" disabled title="Step into" aria-label="Step into"><svg class="ui-icon" aria-hidden="true"><use href="#icon-step-in"></use></svg></button>
+          <button id="debugger-step-out" disabled title="Step out" aria-label="Step out"><svg class="ui-icon" aria-hidden="true"><use href="#icon-step-out"></use></svg></button>
+          <button id="debugger-pause" disabled title="Pause" aria-label="Pause"><svg class="ui-icon" aria-hidden="true"><use href="#icon-pause"></use></svg></button>
+          <button id="debugger-restart" disabled title="Restart" aria-label="Restart"><svg class="ui-icon" aria-hidden="true"><use href="#icon-restart"></use></svg></button>
+          <button id="debugger-stop" disabled title="Stop" aria-label="Stop"><svg class="ui-icon" aria-hidden="true"><use href="#icon-stop"></use></svg></button>
+        </div>
+        <p class="debugger-notice">Debugger support is not installed in this build.</p>
+        <div class="debugger-details">
+          <section><h3>Variables</h3><div id="debugger-variables" class="muted">No paused variables.</div></section>
+          <section><h3>Call stack</h3><div id="debugger-frames" class="muted">No paused frames.</div></section>
+        </div>
+        <section class="debugger-console"><h3>Debug console</h3><pre id="debugger-log" aria-live="polite"></pre><input id="debugger-command" aria-label="Debugger command" placeholder="Debugger not installed" disabled /></section>
       </section>
 
       <div id="horizontal-resizer" class="resizer horizontal" title="Drag to resize"></div>
