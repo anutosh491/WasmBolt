@@ -95,10 +95,10 @@ textarea { flex: 1; width: 100%; resize: none; border: 0; outline: 0; padding: 1
 .terminal-actions { display: flex; justify-content: flex-end; gap: 6px; padding: 3px 8px; border-bottom: 1px solid var(--border); }
 .terminal-scroll { min-height: 0; overflow-x: auto; overflow-y: scroll; padding: 7px 10px 12px; background: #090c11; scroll-behavior: smooth; overscroll-behavior: contain; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
 #log { min-height: 0; overflow: visible; margin: 0; padding: 0; color: #b9c6d8; white-space: pre-wrap; font-size: 11px; line-height: 1.38; }
-.command-line { display: grid; grid-template-columns: auto minmax(120px, 1fr) auto; align-items: center; gap: 8px; min-height: 34px; }
+.command-line { display: grid; grid-template-columns: auto minmax(120px, 1fr); align-items: center; gap: 8px; }
 .command-line span { color: var(--green); font-family: ui-monospace, monospace; font-size: 11px; white-space: nowrap; }
-.command-line input { width: 100%; height: 28px; padding: 0; font-family: ui-monospace, monospace; font-size: 11px; background: transparent; border: 0; outline: 0; }
-.command-line button { padding: 5px 10px; }
+.command-line input { width: 100%; height: 1.38em; padding: 0; font-family: ui-monospace, monospace; font-size: 11px; line-height: 1.38; background: transparent; border: 0; border-radius: 0; }
+.command-line input:focus { outline: 0; }
 
 footer { min-height: 26px; display: flex; justify-content: space-between; gap: 20px; align-items: center; padding: 4px 12px; border-top: 1px solid var(--border); color: var(--muted); background: #0d1118; font-size: 10px; }
 
