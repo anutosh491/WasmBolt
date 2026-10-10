@@ -19,6 +19,8 @@ int runSwiftDriver(llvm::ArrayRef<const char *> args);
 int runClangLinkDriver(llvm::ArrayRef<const char *> args);
 extern int autolink_extract_main(llvm::ArrayRef<const char *> args,
                                 const char *argv0, void *mainAddr);
+extern int modulewrap_main(llvm::ArrayRef<const char *> args,
+                          const char *argv0, void *mainAddr);
 
 namespace {
 // Both frontends own process-wide LLVM state, including diagnostic handlers.
@@ -50,6 +52,10 @@ int runSwiftTool(llvm::ArrayRef<const char *> arguments) {
   if (tool == "swift-autolink-extract")
     return autolink_extract_main(llvm::ArrayRef<const char *>(args).drop_front(), args.front(),
                                 reinterpret_cast<void *>(&runSwiftTool));
+  if ((tool == "swift" || tool == "swiftc") && args.size() > 1 &&
+      llvm::StringRef(args[1]) == "-modulewrap")
+    return modulewrap_main(llvm::ArrayRef<const char *>(args).drop_front(2), args.front(),
+                           reinterpret_cast<void *>(&runSwiftTool));
   if (tool == "clang") return runClangLinkDriver(args);
   if (tool == "wasm-ld") {
     auto result = lld::lldMain(args, llvm::outs(), llvm::errs(),

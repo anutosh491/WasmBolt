@@ -74,6 +74,36 @@ export async function installDebugger(host) {
     if (value !== 'stopped') { revision++; clearFrames(); }
     update();
   }
+  function variableRow(variable, generation) {
+    const expandable = variable.variablesReference > 0;
+    const row = document.createElement(expandable ? 'details' : 'div');
+    const label = expandable ? row.appendChild(document.createElement('summary')) : row;
+    label.className = 'debugger-variable';
+    label.textContent = `${variable.name}  ${variable.type || ''}  ${variable.value}`;
+    if (expandable) {
+      const children = row.appendChild(document.createElement('div'));
+      children.className = 'debugger-variable-children';
+      let loaded = false;
+      row.ontoggle = async () => {
+        if (!row.open || loaded || generation !== revision || phase !== 'stopped') return;
+        loaded = true;
+        children.textContent = 'Loading…';
+        try {
+          const { variables = [] } = await client.request('variables', {
+            variablesReference: variable.variablesReference,
+          });
+          if (generation !== revision || phase !== 'stopped') return;
+          children.replaceChildren(...variables.map(child => variableRow(child, generation)));
+          if (!variables.length) children.textContent = 'No fields available.';
+        } catch (error) {
+          if (generation !== revision || phase !== 'stopped') return;
+          children.textContent = error.message;
+          loaded = false;
+        }
+      };
+    }
+    return row;
+  }
   async function selectFrame(frame, generation) {
     frameId = frame.id;
     host.location(frame.source?.path ? { path: frame.source.path, line: frame.line } : null);
@@ -87,12 +117,7 @@ export async function installDebugger(host) {
       if (globals) ({ variables = [] } = await client.request('variables', { variablesReference: globals.variablesReference }));
     }
     if (generation !== revision || frameId !== frame.id || phase !== 'stopped') return;
-    $('#debugger-variables').replaceChildren(...variables.map(variable => {
-      const row = document.createElement('div');
-      row.className = 'debugger-variable';
-      row.textContent = `${variable.name}  ${variable.type || ''}  ${variable.value}`;
-      return row;
-    }));
+    $('#debugger-variables').replaceChildren(...variables.map(variable => variableRow(variable, generation)));
     if (!variables.length) $('#debugger-variables').textContent = 'No variables in this frame.';
   }
   async function stopped(body) {

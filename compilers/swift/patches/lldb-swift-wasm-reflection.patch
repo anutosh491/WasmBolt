@@ -1,0 +1,58 @@
+diff --git a/lldb/source/Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.cpp b/lldb/source/Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.cpp
+--- a/lldb/source/Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.cpp
++++ b/lldb/source/Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.cpp
+@@ -965,6 +965,39 @@
+                                                likely_module_names);
+   }
+ 
++  // Wasm data segments have linear-memory addresses, but a file-backed module
++  // has no loadable image header. Register its reflection segments directly.
++  if (obj_file->GetArchitecture().GetTriple().isWasm()) {
++    auto format = GetSwiftObjectFileFormat(llvm::Triple::Wasm);
++    auto info_id = m_reflection_ctx->AddImage(
++        [&](swift::ReflectionSectionKind kind)
++            -> std::pair<swift::remote::RemoteRef<void>, uint64_t> {
++          auto section = obj_file->GetSectionList()->FindSectionByName(
++              ConstString(format->getSectionName(kind)));
++          if (!section || !section->GetByteSize())
++            return {};
++          auto address = section->GetLoadBaseAddress(&target);
++          auto size = section->GetByteSize();
++          if (address == LLDB_INVALID_ADDRESS)
++            return {};
++          auto *buffer = malloc(size);
++          if (!buffer)
++            return {};
++          Status error;
++          if (GetProcess().ReadMemory(address, buffer, size, error) != size) {
++            free(buffer);
++            return {};
++          }
++          return {swift::remote::RemoteRef<void>(
++                      swift::remote::RemoteAddress(
++                          address, swift::remote::RemoteAddress::DefaultAddressSpace),
++                      buffer),
++                  size};
++        },
++        GetLikelySwiftImageNamesForModule(module_sp));
++    return info_id.has_value();
++  }
++
+   if (load_ptr == 0 || load_ptr == LLDB_INVALID_ADDRESS) {
+     if (obj_file->GetType() != ObjectFile::eTypeJIT)
+       LLDB_LOG(GetLog(LLDBLog::Types),
+diff --git a/lldb/source/Plugins/LanguageRuntime/Swift/LLDBMemoryReader.cpp b/lldb/source/Plugins/LanguageRuntime/Swift/LLDBMemoryReader.cpp
+--- a/lldb/source/Plugins/LanguageRuntime/Swift/LLDBMemoryReader.cpp
++++ b/lldb/source/Plugins/LanguageRuntime/Swift/LLDBMemoryReader.cpp
+@@ -253,6 +253,11 @@
+     // See https://github.com/swiftlang/llvm-project/issues/12891
+     if (triple.isOSWindows() &&
+         addr.GetFileAddress() != symbol->GetAddressRef().GetFileAddress())
++      return {};
++    // Wasm code and linear memory have overlapping file offsets. Do not use
++    // a code symbol (or a preceding symbol) for a linear-memory descriptor.
++    if (triple.isWasm() &&
++        symbol->GetLoadAddress(&target) != address.getRawAddress())
+       return {};
+     auto mangledName = symbol->GetMangled().GetMangledName().GetStringRef();
+     // MemoryReader requires this to be a Swift symbol. LLDB can also be

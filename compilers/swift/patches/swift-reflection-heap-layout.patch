@@ -1,0 +1,26 @@
+diff --git a/include/swift/Remote/MetadataReader.h b/include/swift/Remote/MetadataReader.h
+--- a/include/swift/Remote/MetadataReader.h
++++ b/include/swift/Remote/MetadataReader.h
+@@ -675,8 +675,8 @@
+       return start;
+     } else {
+       // All swift class instances start with an isa pointer,
+-      // followed by the retain counts (which are the size of a long long).
+-      size_t isaAndRetainCountSize = sizeof(StoredSize) + sizeof(long long);
++      // followed by a pointer-sized inline reference count.
++      size_t isaAndRetainCountSize = 2 * sizeof(StoredPointer);
+       size_t start = isaAndRetainCountSize;
+ 
+       auto classMeta = cast<TargetClassMetadata>(meta);
+diff --git a/include/swift/RemoteInspection/ReflectionContext.h b/include/swift/RemoteInspection/ReflectionContext.h
+--- a/include/swift/RemoteInspection/ReflectionContext.h
++++ b/include/swift/RemoteInspection/ReflectionContext.h
+@@ -1454,7 +1454,7 @@
+   std::optional<unsigned>
+   computeUnalignedFieldStartOffset(const TypeRef *TR,
+                                    remote::TypeInfoProvider *ExternalTypeInfo) {
+-    size_t isaAndRetainCountSize = sizeof(StoredSize) + sizeof(long long);
++    size_t isaAndRetainCountSize = 2 * sizeof(StoredPointer);
+ 
+     const TypeRef *superclass = getBuilder().lookupSuperclass(TR);
+     if (!superclass)

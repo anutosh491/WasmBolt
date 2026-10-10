@@ -11,7 +11,8 @@ set(SWIFT_HOST_RUNTIME "" CACHE PATH "Threaded Swift runtime build")
 set(SWIFT_SOURCE_DIR "" CACHE PATH "Swift source tree")
 
 add_executable(wasmbolt-swift compiler.cpp driver.cpp
-  "${SWIFT_SOURCE_DIR}/lib/DriverTool/autolink_extract_main.cpp")
+  "${SWIFT_SOURCE_DIR}/lib/DriverTool/autolink_extract_main.cpp"
+  "${SWIFT_SOURCE_DIR}/lib/DriverTool/modulewrap_main.cpp")
 target_include_directories(wasmbolt-swift PRIVATE
   ${LLVM_INCLUDE_DIRS} ${CLANG_INCLUDE_DIRS} ${LLD_INCLUDE_DIRS}
   ${SWIFT_INCLUDE_DIRS})

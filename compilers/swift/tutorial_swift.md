@@ -32,8 +32,10 @@ another function, run `dot -Tsvg <file.dot> -o graph.svg` and open `graph.svg` i
 **Build current source** uses `-Onone -gdwarf-types -dwarf-version=4`, independently
 of the output optimization selector. You can instead choose an existing `.wasm`
 under **Debug target**. The panel shows its path; Restart reuses the same program.
-Scalar locals are supported. Generic containers,
-Swift reflection and arbitrary expression evaluation are not yet fully supported.
+Expand struct, array and enum rows in Variables to inspect their fields or
+elements. The debug console also accepts member reads such as `point.x` and
+`numbers[1]`. Evaluating new Swift code in the paused program, such as `n + 1`
+or a function call, requires Wasm JIT support that LLDB does not yet provide.
 
 ## Advanced terminal
 
@@ -69,7 +71,7 @@ own top-level program; compile them separately.
 To debug both files, build full debug information:
 
 ```sh
-swiftc -Onone -gdwarf-types -Xfrontend -dwarf-version=4 math.swift main.swift -o multi-debug.wasm
+swiftc -g math.swift main.swift -o multi-debug.wasm
 ```
 
 Set a breakpoint at `main.swift:2`, open the debugger and choose

@@ -101,7 +101,10 @@ findings during the original task.
    order/counts. The old allocation corrupted allocator metadata for arrays.
 3. Optimized sibling calls mispassed an aggregate IRGen address with this
    Emscripten toolchain. Build Swift C++ with `-fno-optimize-sibling-calls`.
-   This is a workaround needing a reduced toolchain reproducer. Guest Swift
+   LLDB reflection uses the same workaround: without it a correct four-byte
+   metadata pointer acquired garbage upper bits when returned through an
+   aggregate, breaking class/dictionary children. This still needs a reduced
+   toolchain reproducer. Guest Swift
    optimization remains enabled and is tested independently.
 4. Reflection task flags require explicit `size_t` conversion when a 32-bit LLDB
    host instantiates 64-bit reflection. This does not enable arbitrary 64-bit
@@ -139,10 +142,32 @@ findings has been submitted upstream by this task; source pins remain unchanged.
 ## Debugger
 
 Swift-enabled LLDB uses the same LLDB-DAP/WAMR bridge as the focused LLDB
-recipe. Full DWARF types (`-gdwarf-types`, DWARF 4, `-Onone`) provide the
-verified integer locals. Ordinary `-g` relies on runtime reflection unavailable
-in this backend. The debugger installs the matching SDK and sets its Swift
-module/Clang include paths before attach.
+recipe. Debug builds use full DWARF types (`-gdwarf-types`, DWARF 4, `-Onone`).
+The debugger installs the matching SDK and sets its Swift module/Clang include
+paths before attach. The Variables panel lazily expands LLDB's child references;
+stepping, changing frames and ending a session discard stale children.
+
+`45-configure-lldb.sh` also applies two focused reflection patches:
+
+- `lldb-swift-wasm-reflection.patch`, against Swift's LLVM/LLDB fork, registers
+  the named `swift5_*` data segments from live linear memory. Wasm has no
+  loadable image header, so the existing header-address path skipped them.
+  Symbol lookup also requires an exact load-address match: overlapping Wasm
+  code/data file offsets otherwise associated a type descriptor with an
+  unrelated function, corrupting symbolic type-reference decoding.
+- `swift-reflection-heap-layout.patch`, against Swift, uses a pointer-sized
+  inline reference count in both class-layout readers. On wasm32 the heap
+  header is eight bytes, not twelve; the previous calculation read the wrong
+  field offsets. The 64-bit header remains sixteen bytes.
+
+The browser compiler also dispatches Swift's existing `-modulewrap` job, used
+by ordinary `swiftc -g` builds, in-process rather than rejecting it as an unknown
+tool. This is browser integration, not a Swift source patch.
+
+These are upstream contribution candidates, separate from WasmBolt's UI and
+transport. No upstream submission has been made by this task. The browser
+reproducer compiles its own Swift struct, enum, array and nested generic value,
+then inspects the resulting program with this same LLDB/WAMR build.
 
 Shared fixes preserve pthreads between commands, arm stop publication after debugger
 resumes, and forward captured WASI output before exit. The test enters through
@@ -181,9 +206,13 @@ and `answer = 55` before exit 0. These development checks remain in ignored `.wo
 
 Foundation, concurrency, macros and compiler regex literals are excluded.
 Implicit concurrency/StringProcessing imports and SwiftSyntax are disabled.
-Complex value formatting and arbitrary Swift expression evaluation remain
-unvalidated. Raw LLDB variables can report missing reflection metadata while the
-DAP Variables response displays the verified scalar values.
+Struct fields, array elements, Unicode string summaries, enum payloads, class
+fields, dictionaries and nested generic values are now verified through LLDB reflection and the expandable
+Variables panel. Member/element reads such as `point.x` and `numbers[1]` work
+without executing target code. Arbitrary Swift expressions/function calls remain
+unsupported: `ProcessWasm` disables JIT execution and Swift's expression parser
+requires it. The separate Swift REPL runs its own process; it cannot evaluate
+code in a paused program's stack frame.
 
 Multi-file debugging is verified with `math.swift` and `main.swift`: a full-DWARF
 `swiftc` build links both into one Wasm program. Choosing that `.wasm` under
