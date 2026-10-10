@@ -1,0 +1,17 @@
+diff --git a/lldb/source/Core/SourceManager.cpp b/lldb/source/Core/SourceManager.cpp
+--- a/lldb/source/Core/SourceManager.cpp
++++ b/lldb/source/Core/SourceManager.cpp
+@@ -486,6 +486,14 @@
+ void SourceManager::File::CommonInitializer(SupportFileNSP support_file_nsp,
+                                             TargetSP target_sp) {
++#ifdef __EMSCRIPTEN__
++  // Starting a new pthread and synchronously waiting for it can deadlock in an
++  // Emscripten worker. Source loading itself does not require a separate
++  // thread, so preserve the operation while omitting delayed progress events.
++  CommonInitializerImpl(support_file_nsp, target_sp);
++  return;
++#endif
++
+   // It might take a while to read a source file, for example because it's
+   // coming from a virtual file system that's fetching the data on demand. When
+   // reading the data exceeds a certain threshold, show a progress event to let
