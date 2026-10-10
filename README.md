@@ -10,16 +10,10 @@ x86-64 and AArch64.
 They walk through commands and inspecting generated files in the browser.
 
 ```text
-C / C++ source
-  -> Clang AST
-  -> LLVM IR
-  -> opt in a Worker
-  -> LLVM CFG as DOT -> Graphviz in a Worker -> SVG
-  -> llc in a Worker
-  -> position-independent WebAssembly object
-  -> in-process lldWasm
-  -> dynamically loaded WebAssembly side module
-  -> dlsym + execution
+C / C++ source -> resident Clang -> AST / LLVM IR / optimized IR / assembly
+LLVM IR -> resident Clang -> optimized IR / assembly
+Resident Clang -> Wasm object -> in-process wasm-ld -> Wasm side module -> execution
+LLVM CFG -> opt in a Worker -> DOT -> Graphviz in a Worker -> SVG
 ```
 
 ## What works
@@ -75,6 +69,8 @@ interoperability boundary is specifically desired.
 
 The primary interface has only **Compile** and **Compile & Run**. Select an
 output tab before choosing **Compile** to produce that representation.
+**LLVM IR** shows unoptimized frontend output; **Optimized IR** and **Assembly**
+use the selected optimization level.
 **Compile & Run** emits a Wasm object, links and loads the side module, detects
 the exported function signature, and executes it. Open **Advanced terminal**
 for complete manual control: raw `clang`, `mlir-opt`, `mlir-translate`, `opt`,

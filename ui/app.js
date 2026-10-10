@@ -326,8 +326,6 @@ function commandOutputPath(command) {
 }
 
 function commandText(settings, action, target = elements.target.value) {
-  if (settings.llvmIr)
-    throw new Error(`The ${action} action requires C or C++; LLVM IR starts after Clang`);
   const compileTarget = action === "object" ? runtimeTriple : target;
   const systemIncludes = compileTarget.startsWith("wasm") ? [
       "-isystem /include/wasm32-emscripten/c++/v1",
@@ -337,11 +335,17 @@ function commandText(settings, action, target = elements.target.value) {
       "-Xclang -iwithsysroot/include/compat",
       "-isystem /include",
     ].join(" ") : `-isystem ${resourceDir}/include`;
-  const common = `${settings.driver} -x ${settings.x} ${settings.standard} -fno-color-diagnostics -resource-dir=${resourceDir} ${systemIncludes}`;
+  const common = settings.llvmIr
+    ? "clang -x ir -fno-color-diagnostics"
+    : `${settings.driver} -x ${settings.x} ${settings.standard} -fno-color-diagnostics -resource-dir=${resourceDir} ${systemIncludes}`;
   if (action === "ast")
     return `${common} -fsyntax-only -Xclang -ast-dump ${settings.filename}`;
   if (action === "ir")
-    return `${common} --target=${compileTarget} -O${elements.optimization.value} -Xclang -disable-O0-optnone -S -emit-llvm ${settings.filename} -o /workspace/source.ll`;
+    return `${common} --target=${compileTarget} -O0 -Xclang -disable-O0-optnone -S -emit-llvm ${settings.filename} -o /workspace/source.ll`;
+  if (action === "optimized")
+    return `${common} --target=${compileTarget} -O${elements.optimization.value} -Xclang -disable-O0-optnone -S -emit-llvm ${settings.filename} -o /workspace/optimized.ll`;
+  if (action === "assembly")
+    return `${common} --target=${compileTarget} -O${elements.optimization.value} -S ${settings.filename} -o /workspace/output.s`;
   if (action === "object")
     return `${common} --target=${runtimeTriple} -fPIC -fwasm-exceptions -O${elements.optimization.value} -c ${settings.filename} -o /workspace/program.o`;
   throw new Error(`Unknown action ${action}`);
@@ -408,29 +412,25 @@ function parseCommandRedirections(command) {
 }
 
 async function emitIr(settings, target) {
-  removeIfPresent("/workspace/source.ll");
-  if (settings.llvmIr)
+  if (settings.llvmIr) {
     compiler.FS.writeFile("/workspace/source.ll", elements.source.value);
-  else
-    await run(commandText(settings, "ir", target));
-  outputs.ir = readText("/workspace/source.ll");
+    outputs.ir = readText("/workspace/source.ll");
+  } else {
+    await emitClangOutput(settings, "ir", target);
+  }
   return outputs.ir;
 }
 
-async function optimizeIr() {
-  removeIfPresent("/workspace/optimized.ll");
-  const command = `opt -S -passes=default<O${elements.optimization.value}> /workspace/source.ll -o /workspace/optimized.ll`;
-  await run(command);
-  outputs.optimized = readText("/workspace/optimized.ll");
-  return outputs.optimized;
-}
-
-async function emitAssembly() {
-  removeIfPresent("/workspace/output.s");
-  const command = `llc -mtriple=${elements.target.value} -filetype=asm -O${elements.optimization.value} /workspace/optimized.ll -o /workspace/output.s`;
-  await run(command);
-  outputs.assembly = readText("/workspace/output.s");
-  return outputs.assembly;
+async function emitClangOutput(settings, stage, target = elements.target.value) {
+  const path = {
+    ir: "/workspace/source.ll",
+    optimized: "/workspace/optimized.ll",
+    assembly: "/workspace/output.s",
+  }[stage];
+  removeIfPresent(path);
+  await run(commandText(settings, stage, target));
+  outputs[stage] = readText(path);
+  return outputs[stage];
 }
 
 async function compileSelectedOutput() {
@@ -448,11 +448,13 @@ async function compileSelectedOutput() {
     } else if (stage === "ast") {
       if (settings.llvmIr) throw new Error("Clang AST is not applicable to LLVM IR input");
       outputs.ast = await run(commandText(settings, "ast"));
+    } else if (stage === "cfg") {
+      await emitClangOutput(settings, "optimized");
+      await renderCfg();
+    } else if (stage === "optimized" || stage === "assembly") {
+      await emitClangOutput(settings, stage);
     } else {
       await emitIr(settings, elements.target.value);
-      if (stage === "optimized" || stage === "cfg" || stage === "assembly") await optimizeIr();
-      if (stage === "cfg") await renderCfg();
-      if (stage === "assembly") await emitAssembly();
     }
     switchTab(stage);
     refreshWorkspaceFiles();
@@ -542,11 +544,7 @@ async function compileAndRun() {
   try {
     const settings = writeSource();
     removeIfPresent("/workspace/program.o");
-    if (settings.llvmIr) {
-      await run(`llc -mtriple=${runtimeTriple} -filetype=obj -relocation-model=pic -O2 ${settings.filename} -o /workspace/program.o`);
-    } else {
-      await run(commandText(settings, "object"));
-    }
+    await run(commandText(settings, "object"));
 
     currentModulePath = `/workspace/program-${++buildNumber}.wasm`;
     const link = [
@@ -925,9 +923,9 @@ async function loadCompiler() {
       const settings = writeSource();
       outputs.ast = settings.llvmIr ? "LLVM IR input starts after the Clang AST stage." : await run(commandText(settings, "ast"));
       await emitIr(settings, elements.target.value);
-      await optimizeIr();
+      await emitClangOutput(settings, "optimized");
       await renderCfg();
-      await emitAssembly();
+      await emitClangOutput(settings, "assembly");
       await compileAndRun();
       if (autorun === "driver") await loadExistingWasm();
       executeSymbol();
