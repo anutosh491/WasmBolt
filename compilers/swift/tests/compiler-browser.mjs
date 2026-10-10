@@ -9,7 +9,7 @@ const project = resolve(import.meta.dirname, '..');
 const work = resolve(
   process.env.WASMBOLT_SWIFT_WORK_DIR ?? resolve(project, '.work')
 );
-const debuggerTest = false;
+const debuggerTest = process.argv[2] === 'debug';
 const server = createServer(async (request, response) => {
   for (const [name, value] of Object.entries({
     'Cross-Origin-Opener-Policy': 'same-origin',

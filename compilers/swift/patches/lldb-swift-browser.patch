@@ -1,0 +1,296 @@
+diff --git a/lldb/cmake/modules/AddLLDB.cmake b/lldb/cmake/modules/AddLLDB.cmake
+index c302ca11b..4ca41cf5c 100644
+--- a/lldb/cmake/modules/AddLLDB.cmake
++++ b/lldb/cmake/modules/AddLLDB.cmake
+@@ -333,7 +333,8 @@ function(add_lldb_library name)
+     set_target_properties(${name} PROPERTIES FRAMEWORK ON)
+   endif()
+ 
+-  if(PARAM_SHARED)
++  if(PARAM_SHARED OR
++     (LLDB_BUILD_STATIC_LIBLLDB AND libkind STREQUAL "STATIC"))
+     set(install_dest lib${LLVM_LIBDIR_SUFFIX})
+     if(PARAM_INSTALL_PREFIX)
+       set(install_dest ${PARAM_INSTALL_PREFIX})
+@@ -581,7 +582,7 @@ endfunction()
+ # Mach-O uses two-level namespaces and PE/COFF does not export symbols by
+ # default.
+ function(lldb_prevent_liblldb_symbol_interposition name)
+-  if(UNIX AND NOT APPLE)
++  if(UNIX AND NOT APPLE AND NOT EMSCRIPTEN)
+     target_link_options(${name} PRIVATE "LINKER:--exclude-libs,ALL")
+   endif()
+ endfunction()
+diff --git a/lldb/cmake/modules/LLDBConfig.cmake b/lldb/cmake/modules/LLDBConfig.cmake
+index 91445328c..23757e6da 100644
+--- a/lldb/cmake/modules/LLDBConfig.cmake
++++ b/lldb/cmake/modules/LLDBConfig.cmake
+@@ -77,6 +77,10 @@ add_optional_dependency(LLDB_ENABLE_TREESITTER "Enable Tree-sitter syntax highli
+ 
+ option(LLDB_USE_ENTITLEMENTS "When codesigning, use entitlements if available" ON)
+ option(LLDB_BUILD_FRAMEWORK "Build LLDB.framework (Darwin only)" OFF)
++option(LLDB_BUILD_STATIC_LIBLLDB "Build liblldb as a static library" OFF)
++if(LLDB_BUILD_STATIC_LIBLLDB AND NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
++  message(FATAL_ERROR "Static liblldb is only supported for Emscripten")
++endif()
+ option(LLDB_ENABLE_PROTOCOL_SERVERS "Enable protocol servers (e.g. MCP) in LLDB" ON)
+ option(LLDB_NO_INSTALL_DEFAULT_RPATH "Disable default RPATH settings in binaries" OFF)
+ option(LLDB_USE_SYSTEM_DEBUGSERVER "Use the system's debugserver for testing (Darwin only)." OFF)
+diff --git a/lldb/cmake/modules/LLDBStandalone.cmake b/lldb/cmake/modules/LLDBStandalone.cmake
+index 3971008ee..fac327e9f 100644
+--- a/lldb/cmake/modules/LLDBStandalone.cmake
++++ b/lldb/cmake/modules/LLDBStandalone.cmake
+@@ -7,6 +7,9 @@ list(APPEND CMAKE_MODULE_PATH "${LLVM_COMMON_CMAKE_UTILS}/Modules")
+ option(LLVM_INSTALL_TOOLCHAIN_ONLY "Only include toolchain files in the 'install' target." OFF)
+ 
+ find_package(LLVM REQUIRED CONFIG HINTS ${LLVM_DIR} NO_CMAKE_FIND_ROOT_PATH)
++if(EMSCRIPTEN AND LLD_DIR)
++  find_package(LLD REQUIRED CONFIG HINTS ${LLD_DIR} NO_CMAKE_FIND_ROOT_PATH)
++endif()
+ find_package(Clang REQUIRED CONFIG HINTS ${Clang_DIR} ${LLVM_DIR}/../clang NO_CMAKE_FIND_ROOT_PATH)
+ if(LLDB_ENABLE_SWIFT_SUPPORT)
+   find_package(Swift REQUIRED CONFIG HINTS "${Swift_DIR}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+diff --git a/lldb/include/lldb/Host/HostInfo.h b/lldb/include/lldb/Host/HostInfo.h
+index 0f7ec0e0a..46973edaf 100644
+--- a/lldb/include/lldb/Host/HostInfo.h
++++ b/lldb/include/lldb/Host/HostInfo.h
+@@ -35,7 +35,10 @@
+ #if defined(_WIN32)
+ #include "lldb/Host/windows/HostInfoWindows.h"
+ #define HOST_INFO_TYPE HostInfoWindows
+-#elif defined(__linux__) || defined(__EMSCRIPTEN__)
++#elif defined(__EMSCRIPTEN__)
++#include "lldb/Host/emscripten/HostInfoEmscripten.h"
++#define HOST_INFO_TYPE HostInfoEmscripten
++#elif defined(__linux__)
+ #if defined(__ANDROID__)
+ #include "lldb/Host/android/HostInfoAndroid.h"
+ #define HOST_INFO_TYPE HostInfoAndroid
+diff --git a/lldb/source/API/CMakeLists.txt b/lldb/source/API/CMakeLists.txt
+index 95dea070d..0457ab66b 100644
+--- a/lldb/source/API/CMakeLists.txt
++++ b/lldb/source/API/CMakeLists.txt
+@@ -10,6 +10,12 @@ endif()
+ 
+ get_property(LLDB_ALL_PLUGINS GLOBAL PROPERTY LLDB_PLUGINS)
+ 
++if(LLDB_BUILD_STATIC_LIBLLDB)
++  set(liblldb_library_type STATIC)
++else()
++  set(liblldb_library_type SHARED)
++endif()
++
+ if(LLDB_BUILD_FRAMEWORK)
+   set(option_install_prefix INSTALL_PREFIX ${LLDB_FRAMEWORK_INSTALL_DIR})
+   set(option_framework FRAMEWORK)
+@@ -43,7 +49,7 @@ add_custom_target(lldb-sbapi-dwarf-enums
+   DEPENDS ${sb_languages_file})
+ set_target_properties(lldb-sbapi-dwarf-enums PROPERTIES FOLDER "LLDB/Tablegenning")
+ 
+-add_lldb_library(liblldb SHARED ${option_framework}
++add_lldb_library(liblldb ${liblldb_library_type} ${option_framework}
+   SBAddress.cpp
+   SBAddressRange.cpp
+   SBAddressRangeList.cpp
+@@ -184,7 +190,7 @@ set_target_properties(liblldb
+ )
+ 
+ target_compile_definitions(liblldb PRIVATE LLDB_IN_LIBLLDB)
+-if (NOT CMAKE_SYSTEM_NAME MATCHES "Windows")
++if (NOT LLDB_BUILD_STATIC_LIBLLDB AND NOT CMAKE_SYSTEM_NAME MATCHES "Windows")
+   if (LLDB_EXPORT_ALL_SYMBOLS)
+     if (LLDB_EXPORT_ALL_SYMBOLS_EXPORTS_FILE)
+       message(STATUS "Symbols (liblldb): exporting all symbols specified in the exports "
+@@ -232,7 +238,8 @@ if (NOT CMAKE_SYSTEM_NAME MATCHES "Windows")
+     message(STATUS "Symbols (liblldb): exporting all symbols from the lldb namespace")
+     add_llvm_symbol_exports(liblldb ${CMAKE_CURRENT_SOURCE_DIR}/liblldb.exports)
+   endif()
+-elseif (LLDB_EXPORT_ALL_SYMBOLS OR LLDB_ENABLE_DYNAMIC_SCRIPTINTERPRETERS)
++elseif (NOT LLDB_BUILD_STATIC_LIBLLDB AND
++        (LLDB_EXPORT_ALL_SYMBOLS OR LLDB_ENABLE_DYNAMIC_SCRIPTINTERPRETERS))
+   # On Windows there is no per-plugin symbol extraction, so dynamically loaded
+   # script interpreter plugins resolve their imports against the full set of
+   # private symbols, same as LLDB_EXPORT_ALL_SYMBOLS.
+diff --git a/lldb/source/Core/SourceManager.cpp b/lldb/source/Core/SourceManager.cpp
+index e567247bc..e41a59558 100644
+--- a/lldb/source/Core/SourceManager.cpp
++++ b/lldb/source/Core/SourceManager.cpp
+@@ -550,6 +550,11 @@ SourceManager::File::File(SupportFileNSP support_file_nsp, TargetSP target_sp)
+ 
+ void SourceManager::File::CommonInitializer(SupportFileNSP support_file_nsp,
+                                             TargetSP target_sp) {
++#ifdef __EMSCRIPTEN__
++  // A fresh worker cannot start while its creator waits synchronously.
++  CommonInitializerImpl(support_file_nsp, target_sp);
++  return;
++#endif
+   // It might take a while to read a source file, for example because it's
+   // coming from a virtual file system that's fetching the data on demand. When
+   // reading the data exceeds a certain threshold, show a progress event to let
+diff --git a/lldb/source/Host/CMakeLists.txt b/lldb/source/Host/CMakeLists.txt
+index 289391fa9..c79ae625c 100644
+--- a/lldb/source/Host/CMakeLists.txt
++++ b/lldb/source/Host/CMakeLists.txt
+@@ -123,10 +123,13 @@ else()
+     posix/LockFilePosix.cpp
+     posix/MainLoopPosix.cpp
+     posix/PipePosix.cpp
+-    posix/ProcessLauncherPosixFork.cpp
+     posix/Support.cpp
+     )
+ 
++  if (NOT EMSCRIPTEN)
++    add_host_subdirectory(posix posix/ProcessLauncherPosixFork.cpp)
++  endif()
++
+   if(LLDB_ENABLE_SWIFT_SUPPORT)
+     add_host_subdirectory(posix
+       posix/HostInfoPosixSwift.cpp
+@@ -155,6 +158,11 @@ else()
+     endif()
+ 
+ 
++  elseif (EMSCRIPTEN)
++    add_host_subdirectory(emscripten
++      emscripten/Host.cpp
++      emscripten/HostInfoEmscripten.cpp
++      )
+   elseif (CMAKE_SYSTEM_NAME MATCHES "Linux|Android")
+     add_host_subdirectory(linux
+       linux/AbstractSocket.cpp
+diff --git a/lldb/source/Host/common/Host.cpp b/lldb/source/Host/common/Host.cpp
+index c4e1500fe..011a87497 100644
+--- a/lldb/source/Host/common/Host.cpp
++++ b/lldb/source/Host/common/Host.cpp
+@@ -583,6 +583,9 @@ Status Host::RunShellCommand(llvm::StringRef shell_path, const Args &args,
+ // platforms
+ #if !defined(__APPLE__)
+ Status Host::LaunchProcess(ProcessLaunchInfo &launch_info) {
++#if defined(__EMSCRIPTEN__)
++  return Status::FromErrorString("Native process launch is unavailable in the browser");
++#else
+   std::unique_ptr<ProcessLauncher> delegate_launcher;
+ #if defined(_WIN32)
+   delegate_launcher.reset(new ProcessLauncherWindows());
+@@ -599,6 +602,7 @@ Status Host::LaunchProcess(ProcessLaunchInfo &launch_info) {
+   launch_info.SetProcessID(process.GetProcessId());
+ 
+   return error;
++#endif
+ }
+ #endif // !defined(__APPLE__)
+ 
+diff --git a/lldb/source/Host/posix/HostInfoPosixSwift.cpp b/lldb/source/Host/posix/HostInfoPosixSwift.cpp
+index ac90d9f7e..c79ef4226 100644
+--- a/lldb/source/Host/posix/HostInfoPosixSwift.cpp
++++ b/lldb/source/Host/posix/HostInfoPosixSwift.cpp
+@@ -29,9 +29,14 @@ FileSpec HostInfoPosix::GetSwiftResourceDir() {
+   static std::once_flag g_once_flag;
+   static FileSpec g_swift_resource_dir;
+   std::call_once(g_once_flag, []() {
++#if defined(__EMSCRIPTEN__)
++    // The browser bridge installs its verified Swift SDK at this stable path.
++    g_swift_resource_dir = FileSpec("/swift/lib/swift");
++#else
+     FileSpec lldb_file_spec = HostInfoPosix::GetShlibDir();
+     HostInfoPosix::ComputeSwiftResourceDirectory(lldb_file_spec,
+                                                  g_swift_resource_dir, true);
++#endif
+     Log *log = GetLog(LLDBLog::Host);
+     LLDB_LOG(log, "swift dir -> '{0}'", g_swift_resource_dir);
+   });
+diff --git a/lldb/source/Target/Memory.cpp b/lldb/source/Target/Memory.cpp
+index c7f58c8e5..d06f0255e 100644
+--- a/lldb/source/Target/Memory.cpp
++++ b/lldb/source/Target/Memory.cpp
+@@ -19,6 +19,7 @@
+ #include <algorithm>
+ #include <cinttypes>
+ #include <memory>
++#include <limits>
+ #include <utility>
+ 
+ using namespace lldb;
+@@ -184,7 +185,11 @@ void MemoryCache::InsertData(addr_t addr, llvm::ArrayRef<uint8_t> src) {
+ 
+ void MemoryCache::AddCacheData(lldb::addr_t addr,
+                                const DataBufferSP &data_buffer_sp) {
+-  InsertData(addr, {data_buffer_sp->GetBytes(), data_buffer_sp->GetByteSize()});
++  const auto byte_size = data_buffer_sp->GetByteSize();
++  if (byte_size > std::numeric_limits<size_t>::max())
++    return;
++  InsertData(addr,
++             {data_buffer_sp->GetBytes(), static_cast<size_t>(byte_size)});
+ }
+ 
+ void MemoryCache::Flush(addr_t addr, size_t size) {
+diff --git a/lldb/include/lldb/Host/emscripten/HostInfoEmscripten.h b/lldb/include/lldb/Host/emscripten/HostInfoEmscripten.h
+new file mode 100644
+--- /dev/null
++++ b/lldb/include/lldb/Host/emscripten/HostInfoEmscripten.h
+@@ -0,0 +1,23 @@
++//===-- HostInfoEmscripten.h -------------------------------------*- C++ -*-===//
++// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
++// See https://llvm.org/LICENSE.txt for license information.
++// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++
++#ifndef LLDB_HOST_EMSCRIPTEN_HOSTINFOEMSCRIPTEN_H
++#define LLDB_HOST_EMSCRIPTEN_HOSTINFOEMSCRIPTEN_H
++
++#include "lldb/Host/posix/HostInfoPosix.h"
++#include "lldb/Utility/FileSpec.h"
++
++namespace lldb_private {
++class HostInfoEmscripten : public HostInfoPosix {
++  friend class HostInfoBase;
++
++public:
++  static void Initialize();
++  static void Terminate();
++  static FileSpec GetProgramFileSpec();
++};
++} // namespace lldb_private
++
++#endif
+diff --git a/lldb/source/Host/emscripten/Host.cpp b/lldb/source/Host/emscripten/Host.cpp
+new file mode 100644
+--- /dev/null
++++ b/lldb/source/Host/emscripten/Host.cpp
+@@ -0,0 +1,20 @@
++//===-- Host.cpp ----------------------------------------------------------===//
++// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
++// See https://llvm.org/LICENSE.txt for license information.
++// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++
++#include "lldb/Host/Host.h"
++#include "lldb/Utility/Status.h"
++
++using namespace lldb_private;
++
++uint32_t Host::FindProcessesImpl(const ProcessInstanceInfoMatch &,
++                               ProcessInstanceInfoList &) {
++  return 0;
++}
++bool Host::GetProcessInfo(lldb::pid_t, ProcessInstanceInfo &) { return false; }
++Status Host::ShellExpandArguments(ProcessLaunchInfo &,
++                                  const Timeout<std::micro> &) {
++  return Status::FromErrorString(
++      "shell expansion is not supported under Emscripten");
++}
+diff --git a/lldb/source/Host/emscripten/HostInfoEmscripten.cpp b/lldb/source/Host/emscripten/HostInfoEmscripten.cpp
+new file mode 100644
+--- /dev/null
++++ b/lldb/source/Host/emscripten/HostInfoEmscripten.cpp
+@@ -0,0 +1,12 @@
++//===-- HostInfoEmscripten.cpp ---------------------------------------------===//
++// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
++// See https://llvm.org/LICENSE.txt for license information.
++// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++
++#include "lldb/Host/emscripten/HostInfoEmscripten.h"
++
++using namespace lldb_private;
++
++void HostInfoEmscripten::Initialize() { HostInfoPosix::Initialize(); }
++void HostInfoEmscripten::Terminate() { HostInfoBase::Terminate(); }
++FileSpec HostInfoEmscripten::GetProgramFileSpec() { return {}; }

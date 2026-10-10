@@ -8,7 +8,7 @@ pipeline runs locally in the browser. Try here : https://anutosh21.github.io/Was
 Start with the [tutorials](tutorials.md) for MLIR, WebAssembly, LLVM utilities,
 x86-64 and AArch64.
 They walk through commands and inspecting generated files in the browser.
-Optional Swift compilation has its own [build instructions](compilers/swift/README.md)
+Optional Swift compilation and debugging have their own [build instructions](compilers/swift/README.md)
 and [tutorial](compilers/swift/tutorial_swift.md).
 
 ```text
@@ -91,7 +91,7 @@ Each command gets a fresh Worker to isolate tool shutdown and command-line state
 
 Source lives in `ui/`, `compilers/clang/`, `linkers/wasm-ld/`, `runtime/` and
 `tools/`. `language-services/clangd/` runs the packaged language server in a
-persistent Worker. `debugger/` holds the future LLDB placeholder; `scripts/` handles builds.
+persistent Worker. `debugger/lldb/` holds the optional LLDB/WAMR adapter; `scripts/` handles builds.
 
 Click **Enable clangd** for C/C++ suggestions beside the caret. **Tab** accepts,
 **Ctrl+Space** requests completion, **F8** visits diagnostics and **F12** opens a

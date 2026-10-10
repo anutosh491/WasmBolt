@@ -1,3 +1,4 @@
+import { installDebugger, prepareDebugger, workspaceExampleNames as debuggerExampleNames, loadWorkspaceExamples } from "../debugger/lldb/ui.js";
 import { updateDebuggerTarget } from "./debugger-target.js";
 import { installClangd } from "../language-services/clangd/ui.js";
 import { examples } from "./examples.js";
@@ -11,6 +12,7 @@ import { createWorkspace, swiftExampleNames, loadSwiftExamples } from "../compil
 
 const $ = (selector) => document.querySelector(selector);
 const swiftOnly = $('meta[name="wasmbolt-compiler"]')?.content === 'swift';
+const debuggerEnabled = $('meta[name="wasmbolt-debugger"]')?.content === 'lldb';
 
 const elements = {
   source: $("#source"),
@@ -45,7 +47,7 @@ const elements = {
 };
 
 const swiftEnabled = !elements.language.querySelector('option[value="swift"]').disabled;
-const workspaceExampleNames = [...(swiftOnly ? [] : ['snippet.cpp', 'input.mlir']), ...(swiftEnabled ? swiftExampleNames : [])];
+const workspaceExampleNames = [...(swiftOnly ? [] : debuggerExampleNames), ...(swiftEnabled ? swiftExampleNames : [])];
 
 const outputs = {
   ast: "",
@@ -72,6 +74,8 @@ const defaultSources = new Map([
   ...(swiftOnly ? [] : [["/workspace/snippet.cpp", examples.cpp], ["/workspace/input.mlir", examples.mlir]]),
 ]);
 const workspaceSources = new Map(defaultSources);
+let debuggerUi = null;
+let debugLocation = null;
 let resourceDir = "/lib/clang/23";
 let runtimeTriple = "wasm32-unknown-emscripten";
 let runtimeVersion = "LLVM 23.1.2", targetSupport = {};
@@ -125,6 +129,7 @@ function setBusy(value, message = "Working…") {
   $("#new-file").disabled = value || !compiler;
   $("#debugger-target").disabled = value || !compiler;
   if (value) setStatus(message, "loading");
+  debuggerUi?.update();
 }
 
 function languageSettings() {
@@ -246,7 +251,8 @@ function refreshWorkspaceFiles(preferred = "") {
     : "The browser filesystem is empty.";
   if (activeTab === "files") elements.output.textContent = outputs.files;
   renderExplorer(files);
-  updateDebuggerTarget(files, languageSettings().filename);
+  if (debuggerUi) debuggerUi.update();
+  else updateDebuggerTarget(files, languageSettings().filename);
 }
 
 function renderSourceGutter() {
@@ -260,11 +266,13 @@ function renderSourceGutter() {
     const button = document.createElement("button");
     button.textContent = String(line);
     button.dataset.line = line;
+    button.classList.toggle("current-line", debugLocation?.path === path && debugLocation.line === line);
     button.setAttribute("aria-label", `Breakpoint at line ${line}`);
     button.setAttribute("aria-pressed", String(lines.has(line)));
     button.addEventListener("click", () => {
       if (lines.has(line)) lines.delete(line); else lines.add(line);
       button.setAttribute("aria-pressed", String(lines.has(line)));
+      debuggerUi?.syncBreakpoints(path, [...lines]);
     });
     return button;
   }));
@@ -308,7 +316,10 @@ function toggleDebugger(visible) {
   $("#debugger-panel").classList.toggle("hidden", !visible);
   $(".output-pane").classList.toggle("hidden", visible);
   $("#toggle-debugger").setAttribute("aria-expanded", String(visible));
-
+  if (visible && debuggerEnabled) {
+    if (debuggerUi) debuggerUi.preload();
+    else prepareDebugger();
+  }
 }
 
 function isTextFile(path) {
@@ -751,7 +762,7 @@ function resetSource() {
 }
 
 function updateLanguageUi() {
-  updateDebuggerTarget(compiler ? workspaceFiles(compiler.FS) : [], languageSettings().filename);
+  if (!debuggerUi) updateDebuggerTarget(compiler ? workspaceFiles(compiler.FS) : [], languageSettings().filename);
   const isSwift = elements.language.value === "swift";
   const isLlvmIr = elements.language.value === "llvm";
   const isMlir = elements.language.value === "mlir";
@@ -782,6 +793,7 @@ function updateLanguageUi() {
   if (isMlir && activeTab !== "mlir") switchTab("mlir");
   if (!isMlir && activeTab === "mlir") switchTab("ir");
   if (isLlvmIr && activeTab === "ast") switchTab("ir");
+  debuggerUi?.update();
 }
 
 function serializableState() {
@@ -1061,6 +1073,36 @@ async function loadCompiler(workspaceReady) {
       files: () => workspaceFiles(compiler.FS),
       open: editWorkspaceFile,
     });
+    if (debuggerEnabled) debuggerUi = await installDebugger({
+      FS: compiler.FS, source: writeSource, open: editWorkspaceFile, run,
+      files: () => workspaceFiles(compiler.FS),
+      sourceName: () => languageSettings().filename,
+      refresh: () => refreshWorkspaceFiles(),
+      breakpoints: () => sourceBreakpoints,
+      language: () => elements.language.value,
+      arch: () => elements.language.value === 'swift' ? 'wasm32' : document.body.dataset.runtimeArch,
+      target: () => elements.target.value,
+      resourceDir: () => resourceDir, busy: () => busy,
+      async buildSwift(output) {
+        setBusy(true, 'Building Swift debug program…');
+        try { await buildSwift(writeSource(), output, true); setStatus('Compiler ready'); }
+        catch (error) { setStatus('Compilation failed', 'error'); throw error; }
+        finally { setBusy(false); }
+      },
+      location: location => {
+        debugLocation = location;
+        if (location?.path.startsWith("/workspace/") && sourcePath !== location.path) {
+          try { compiler.FS.stat(location.path); editWorkspaceFile(location.path); } catch (_) {}
+        }
+        renderSourceGutter();
+        if (location && languageSettings().filename === location.path) {
+          elements.source.scrollTop = Math.max(0, (location.line - 5) * parseFloat(getComputedStyle(elements.source).lineHeight));
+          $("#source-gutter").scrollTop = elements.source.scrollTop;
+        }
+      },
+    });
+    elements.target.addEventListener("change", () => debuggerUi?.update());
+    if ($("#toggle-debugger").getAttribute("aria-expanded") === "true") debuggerUi?.preload();
     updateLanguageUi();
     const autorun = new URLSearchParams(location.search).get("autorun");
     if (autorun === "1" || autorun === "driver") {
@@ -1121,7 +1163,7 @@ wireUi();
 switchTab("ir");
 writeSource();
 const workspaceReady = (async () => {
-  const loadedExamples = swiftEnabled ? await loadSwiftExamples() : {};
+  const loadedExamples = { ...(debuggerEnabled ? await loadWorkspaceExamples() : {}), ...(swiftEnabled ? await loadSwiftExamples() : {}) };
   for (const [name, source] of Object.entries(loadedExamples)) {
     const path = `/workspace/${name}`;
     defaultSources.set(path, source);
