@@ -131,6 +131,11 @@
 
       <section id="debugger-panel" class="pane debugger-pane hidden" aria-label="Debugger">
         <div class="pane-title"><strong>Debugger</strong><button id="close-debugger" class="quiet" aria-label="Close debugger panel" title="Close debugger panel"><svg class="ui-icon" aria-hidden="true"><use href="#icon-close"></use></svg></button></div>
+        <div class="debugger-target">
+          <label for="debugger-target">Debug target</label>
+          <select id="debugger-target" aria-describedby="debugger-program" disabled><option value="">Build current source</option></select>
+          <p id="debugger-program">Start builds the current source with debug information.</p>
+        </div>
         <div class="debugger-actions" aria-label="Debugger controls">
           <button id="debugger-start" disabled>Start</button>
           <button id="debugger-continue" disabled title="Continue" aria-label="Continue"><svg class="ui-icon" aria-hidden="true"><use href="#icon-play"></use></svg></button>

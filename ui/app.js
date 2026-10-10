@@ -1,3 +1,4 @@
+import { updateDebuggerTarget } from "./debugger-target.js";
 import { examples } from "./examples.js";
 import { publicFunctionExports, displayFunctionExport, parseWasmFunctionSignatures } from "../runtime/exports.js";
 import { runTool, isToolCommand, workspaceFiles } from "../tools/client.js";
@@ -105,6 +106,7 @@ function setBusy(value, message = "Working…") {
       (button === elements.compileRun && elements.language.value === "mlir");
   elements.execute.disabled = value || !selectedSignature || !currentModulePath;
   $("#new-file").disabled = value || !compiler;
+  $("#debugger-target").disabled = value || !compiler;
   if (value) setStatus(message, "loading");
 }
 
@@ -218,6 +220,7 @@ function refreshWorkspaceFiles(preferred = "") {
     : "The browser filesystem is empty.";
   if (activeTab === "files") elements.output.textContent = outputs.files;
   renderExplorer(files);
+  updateDebuggerTarget(files, languageSettings().filename);
 }
 
 function renderSourceGutter() {
@@ -654,6 +657,7 @@ function resetSource() {
 }
 
 function updateLanguageUi() {
+  updateDebuggerTarget(compiler ? workspaceFiles(compiler.FS) : [], languageSettings().filename);
   const isLlvmIr = elements.language.value === "llvm";
   const isMlir = elements.language.value === "mlir";
   const astTab = document.querySelector('[data-tab="ast"]');
@@ -793,6 +797,7 @@ function wireUi() {
   renderSourceGutter();
   elements.source.addEventListener("scroll", () => { $("#source-gutter").scrollTop = elements.source.scrollTop; });
   $("#toggle-debugger").addEventListener("click", () => toggleDebugger($("#toggle-debugger").getAttribute("aria-expanded") !== "true"));
+  $("#debugger-target").addEventListener("change", () => refreshWorkspaceFiles());
   $("#close-debugger").addEventListener("click", () => toggleDebugger(false));
   $("#new-file").addEventListener("click", () => {
     if (!compiler || busy) return;
