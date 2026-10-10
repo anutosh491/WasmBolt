@@ -11,6 +11,7 @@ dependencies:
   - llvm-tools =23.1.2
   - mlir =23.1.2
   - graphviz =15.1.0
+  - clangd =23.1.2
 
   # Optional libraries: enable compatible packages for your deployment.
   # - boost-cpp

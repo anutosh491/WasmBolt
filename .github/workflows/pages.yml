@@ -58,6 +58,11 @@ jobs:
           test -s site/runtime/Compiler.wasm
           test -s site/runtime/Compiler.data
           test -s site/tools/worker.js
+          test -s site/language-services/clangd/runtime/clangd.js
+          test -s site/language-services/clangd/runtime/clangd.wasm
+          test -s site/coi-serviceworker.js
+          test -s site/coi-serviceworker.LICENSE
+          test -s site/ui/isolation.js
           for tool in opt llc llvm-ar llvm-cxxfilt llvm-nm llvm-objcopy \
                       llvm-objdump llvm-readobj llvm-size mlir-opt mlir-translate dot; do
             test -s "site/tools/${tool}.js"
