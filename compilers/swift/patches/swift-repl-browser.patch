@@ -1,0 +1,1759 @@
+diff --git a/SwiftCompilerSources/Sources/SIL/Function.swift b/SwiftCompilerSources/Sources/SIL/Function.swift
+index cd5a9c7..5eab8dd 100644
+--- a/SwiftCompilerSources/Sources/SIL/Function.swift
++++ b/SwiftCompilerSources/Sources/SIL/Function.swift
+@@ -436,6 +436,7 @@ final public class Function : CustomStringConvertible, HasShortDescription, Hash
+     case interface       /// Came from a .swiftinterface file, representing another module.
+     case macroExpansion  /// Came from a macro expansion.
+     case defaultArgument /// Came from default argument at caller side
++    case repl            /// Came from the REPL
+   };
+ 
+   public var sourceFileKind: SourceFileKind? {
+@@ -446,6 +447,7 @@ final public class Function : CustomStringConvertible, HasShortDescription, Hash
+     case .Interface: return .interface
+     case .MacroExpansion: return .macroExpansion
+     case .DefaultArgument: return .defaultArgument
++    case .REPL: return .repl
+     case .None: return nil
+     @unknown default:
+       fatalError("unknown enum case")
+diff --git a/include/swift/AST/ASTBridging.h b/include/swift/AST/ASTBridging.h
+index 1233478..18b043f 100644
+--- a/include/swift/AST/ASTBridging.h
++++ b/include/swift/AST/ASTBridging.h
+@@ -646,6 +646,9 @@ SWIFT_NAME("getter:BridgedDeclContext.parentSourceFile(self:)")
+ BRIDGED_INLINE BridgedSourceFile
+ BridgedDeclContext_getParentSourceFile(BridgedDeclContext dc);
+ 
++SWIFT_NAME("getter:BridgedSourceFile.allowsTopLevelCode(self:)")
++BRIDGED_INLINE bool BridgedSourceFile_allowsTopLevelCode(BridgedSourceFile sf);
++
+ SWIFT_NAME("getter:BridgedSourceFile.isScriptMode(self:)")
+ BRIDGED_INLINE bool BridgedSourceFile_isScriptMode(BridgedSourceFile sf);
+ 
+diff --git a/include/swift/AST/ASTBridgingImpl.h b/include/swift/AST/ASTBridgingImpl.h
+index 37764f6..dc5213b 100644
+--- a/include/swift/AST/ASTBridgingImpl.h
++++ b/include/swift/AST/ASTBridgingImpl.h
+@@ -146,6 +146,10 @@ BridgedDeclContext_getParentSourceFile(BridgedDeclContext dc) {
+ // MARK: BridgedSoureFile
+ //===----------------------------------------------------------------------===//
+ 
++bool BridgedSourceFile_allowsTopLevelCode(BridgedSourceFile sf) {
++  return sf.unbridged()->allowsTopLevelCode();
++}
++
+ bool BridgedSourceFile_isScriptMode(BridgedSourceFile sf) {
+   return sf.unbridged()->isScriptMode();
+ }
+diff --git a/include/swift/AST/Module.h b/include/swift/AST/Module.h
+index 99b2b38..27bb0da 100644
+--- a/include/swift/AST/Module.h
++++ b/include/swift/AST/Module.h
+@@ -103,6 +103,7 @@ enum class SourceFileKind {
+   MacroExpansion,  ///< Came from a macro expansion.
+   DefaultArgument, ///< Came from default argument at caller side
+   SyntheticMacro,  ///< Came from a synthesized macro
++  REPL,     ///< A REPL input. Parses like Library (no main entry point) but permits top-level statements and expressions.
+ };
+ 
+ /// Contains information about where a particular path is used in
+diff --git a/include/swift/AST/SourceFile.h b/include/swift/AST/SourceFile.h
+index 873c832..504aace 100644
+--- a/include/swift/AST/SourceFile.h
++++ b/include/swift/AST/SourceFile.h
+@@ -288,6 +288,13 @@ public:
+   /// See rdar://58355191
+   void prependTopLevelDecl(Decl *d);
+ 
++  /// Replaces all top-level items with \p newItems.
++  ///
++  /// Only for use by REPL AST transforms that reorganize the top-level
++  /// structure after type-checking (e.g. wrapping TopLevelCodeDecl bodies
++  /// into a synthesized wrapper function).
++  void replaceTopLevelItems(ArrayRef<ASTNode> newItems);
++
+   /// Add a hoisted declaration. See Decl::isHoisted().
+   void addHoistedDecl(Decl *d);
+ 
+@@ -750,6 +757,25 @@ public:
+     return isa<FileUnit>(DC) && classof(cast<FileUnit>(DC));
+   }
+ 
++  /// True if this source file permits top-level statements and expressions.
++  /// Unlike isScriptMode(), this does not affect how declarations are lowered.
++  bool allowsTopLevelCode() const {
++    switch (Kind) {
++    case SourceFileKind::Main:
++    case SourceFileKind::REPL:
++      return true;
++
++    case SourceFileKind::Library:
++    case SourceFileKind::Interface:
++    case SourceFileKind::SIL:
++    case SourceFileKind::MacroExpansion:
++    case SourceFileKind::DefaultArgument:
++    case SourceFileKind::SyntheticMacro:
++      return false;
++    }
++    llvm_unreachable("bad SourceFileKind");
++  }
++
+   /// True if this is a "script mode" source file that admits top-level code.
+   bool isScriptMode() const {
+     switch (Kind) {
+@@ -762,6 +788,7 @@ public:
+     case SourceFileKind::MacroExpansion:
+     case SourceFileKind::DefaultArgument:
+     case SourceFileKind::SyntheticMacro:
++    case SourceFileKind::REPL:
+       return false;
+     }
+     llvm_unreachable("bad SourceFileKind");
+diff --git a/include/swift/IDE/REPLCodeCompletion.h b/include/swift/IDE/REPLCodeCompletion.h
+index 12e1ef7..8b6b7e1 100644
+--- a/include/swift/IDE/REPLCodeCompletion.h
++++ b/include/swift/IDE/REPLCodeCompletion.h
+@@ -109,6 +109,14 @@ public:
+     return CompletionStrings;
+   }
+ 
++  /// The partial identifier the user typed that all completions share as a
++  /// common prefix.  Empty if the cursor is right after a '.' or '('.
++  StringRef getPrefix() const { return Prefix; }
++
++  /// All completion results (insertable suffix after prefix + bytes to erase).
++  /// Prefer this over repeatedly calling getNextStem() in one-shot UIs.
++  ArrayRef<CookedResult> getCookedResults() const { return CookedResults; }
++
+   /// Reset the completion set to an invalid state.
+   void reset();
+ };
+diff --git a/include/swift/Immediate/Immediate.h b/include/swift/Immediate/Immediate.h
+index 10f0425..43a11fe 100644
+--- a/include/swift/Immediate/Immediate.h
++++ b/include/swift/Immediate/Immediate.h
+@@ -44,6 +44,13 @@ namespace swift {
+ 
+   int RunImmediatelyFromAST(CompilerInstance &CI);
+ 
++  /// Run the integrated Swift REPL.
++  ///
++  /// \param CI The compiler instance, already configured for REPL mode.
++  /// \param ParseStdlib If true, parse the stdlib (for testing).
++  void runREPL(CompilerInstance &CI, const ProcessCmdLine &CmdLine,
++               bool ParseStdlib);
++
+ } // end namespace swift
+ 
+ #endif // SWIFT_IMMEDIATE_IMMEDIATE_H
+diff --git a/include/swift/Immediate/Interpreter.h b/include/swift/Immediate/Interpreter.h
+new file mode 100644
+index 0000000..c1b77b2
+--- /dev/null
++++ b/include/swift/Immediate/Interpreter.h
+@@ -0,0 +1,188 @@
++//===--- Interpreter.h - Swift incremental REPL interpreter ---------------===//
++//
++// This source file is part of the Swift.org open source project
++//
++// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
++// Licensed under Apache License v2.0 with Runtime Library Exception
++//
++// See https://swift.org/LICENSE.txt for license information
++// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
++//
++//===----------------------------------------------------------------------===//
++///
++/// \file
++/// Declares swift::Interpreter -- the public API for incremental Swift
++/// execution, directly analogous to clang::Interpreter in clang-repl.
++///
++/// The caller is responsible for setting up and owning the CompilerInstance,
++/// mirroring how the Swift frontend calls runREPL(Instance, ...) from
++/// performAction().  Embedders such as xeus-swift follow the same pattern:
++/// parse args into a CompilerInvocation, call CI.setup(), then create an
++/// Interpreter and call parseAndExecute() for each input cell.
++///
++//===----------------------------------------------------------------------===//
++
++#ifndef SWIFT_IMMEDIATE_INTERPRETER_H
++#define SWIFT_IMMEDIATE_INTERPRETER_H
++
++#include "swift/Immediate/Immediate.h"   // ProcessCmdLine
++#include "llvm/ADT/StringRef.h"
++#include <memory>
++#include <string>
++#include <vector>
++
++namespace swift {
++class CompilerInstance;
++class ModuleDecl;
++class SwiftJIT;
++class SwiftWasmExecutor;
++
++/// Per-session compiler and execution environment for incremental Swift.
++///
++/// Analogous to clang::Interpreter: the caller owns the CompilerInstance and
++/// is responsible for keeping it alive for the duration of the session.
++///
++/// Typical usage from an embedding tool:
++/// \code
++///   swift::CompilerInvocation invocation;
++///   invocation.parseArgs(args, diags);
++///   invocation.getFrontendOptions().RequestedAction = ActionType::REPL;
++///
++///   swift::CompilerInstance CI;
++///   CI.setup(invocation, err, args);
++///
++///   swift::Interpreter interp(CI, swift::ProcessCmdLine{}, parseStdlib);
++///   interp.parseAndExecute("let x = 42");
++///   interp.parseAndExecute("print(x)");  // prints "42"
++/// \endcode
++class Interpreter {
++  CompilerInstance &CI;
++  ModuleDecl *MostRecentModule;
++  unsigned InputNumber = 1;
++  /// Counter for auto-printed result variables ($R0, $R1, …).
++  unsigned ResultIdx = 0;
++  /// Long-lived JIT session -- all cells share the same JITDylib.
++#ifdef __EMSCRIPTEN__
++  std::unique_ptr<SwiftWasmExecutor> JIT;
++#else
++  std::unique_ptr<SwiftJIT> JIT;
++#endif
++  /// Swift function called for last-value auto-display (e.g. "_xeusAutoDisplay").
++  /// Empty string means use the default Swift.print behaviour.
++  std::string DisplayFunc;
++
++public:
++  Interpreter(CompilerInstance &CI, const ProcessCmdLine &CmdLine,
++              bool ParseStdlib);
++
++  /// Destructor defined in REPL.cpp where SwiftJIT is a complete type.
++  ~Interpreter();
++
++  Interpreter(const Interpreter &) = delete;
++  Interpreter &operator=(const Interpreter &) = delete;
++
++  unsigned getInputNumber() const { return InputNumber; }
++
++  /// Returns true if the JIT session was successfully initialised.
++  bool isReady() const { return (bool)JIT; }
++
++  /// Result of an input-completeness check.
++  struct InputCompleteness {
++    /// True if the input is syntactically complete and ready to execute.
++    bool IsComplete;
++    /// Leading whitespace of the line containing the last unbalanced opener
++    /// ('{'/'('/'[').  Clients use this as the base indentation prefix.
++    std::string IndentPrefix;
++    /// Number of additional indent levels beyond IndentPrefix.
++    uint32_t IndentLevel;
++  };
++
++  /// Check whether \p Text is syntactically complete (all brackets balanced,
++  /// no dangling expression).  Used by the REPL loop to decide whether to
++  /// show a continuation prompt instead of executing immediately, and by
++  /// Jupyter kernels to implement the is_complete_request handler.
++  InputCompleteness isInputComplete(llvm::StringRef Text) const;
++
++  /// Outcome of a single parseAndExecute call.
++  enum class REPLResult {
++    /// Cell was parsed, compiled, and JIT-executed without errors.
++    Success,
++    /// Non-fatal compile/type-check/SIL error.  The session continues; the
++    /// caller should surface the diagnostic text to the user.
++    CompileError,
++    /// The session must end (:quit command or unrecoverable JIT failure).
++    Fatal,
++  };
++
++  /// Register a Swift function name for last-value auto-display.
++  ///
++  /// When set, auto-print generates:
++  /// \code
++  ///   let __repl_rN = (expr)
++  ///   funcName(__repl_rN, "$RN")
++  /// \endcode
++  ///
++  /// The function must be defined with two overloads — one constrained on the
++  /// rich-display protocol, one unconstrained fallback:
++  /// \code
++  ///   // Rich display for MimeBundleRepresentable (or any protocol):
++  ///   public func funcName<T: Protocol>(_ v: T, _ label: String) { v.method() }
++  ///   // Plain fallback for every other type:
++  ///   public func funcName<T>(_ v: T, _ label: String) { Swift.print(...) }
++  /// \endcode
++  ///
++  /// Swift resolves the correct overload at typecheck time (concrete type
++  /// is always known in the auto-print wrapper) — no runtime conformance
++  /// lookup, no \c as? cast, no existential boxing overhead.
++  ///
++  /// If \p funcName is not yet in scope at typecheck time, the wrapped
++  /// typecheck fails silently (DiagnosticSuppression) and the expression
++  /// runs with no output — safe fallback.
++  ///
++  /// Pass an empty string to restore the default \c Swift.print behaviour.
++  void setLastValueDisplayFunc(std::string funcName);
++
++  /// Load a dynamic library into the process at runtime.
++  ///
++  /// Analogous to \c clang::Interpreter::LoadDynamicLibrary.  Calls
++  /// \c dlopen(path, RTLD_LAZY | RTLD_GLOBAL) so the library's symbols become
++  /// visible to the \c DynamicLibrarySearchGenerator on the next JIT link step.
++  ///
++  /// Use this for pure-C dylibs (no .swiftmodule) or as an escape hatch for
++  /// libraries whose .swiftmodule lacks \c -module-link-name metadata.
++  /// For well-built Swift modules, prefer passing \c -L to the kernel so that
++  /// \c autolinkImportedModules resolves the library automatically on
++  /// \c import.
++  ///
++  /// \returns \c true on success, \c false if \c dlopen failed (message on
++  ///          stderr).
++  bool loadLibrary(llvm::StringRef path);
++
++  /// Parse and JIT-execute one input cell.
++  ///
++  /// \returns the outcome — Success, CompileError, or Fatal.
++  REPLResult parseAndExecute(llvm::StringRef Line);
++
++  /// One-shot code-completion result for an embedding UI (e.g. Jupyter).
++  ///
++  /// \p Matches contains the full insertable strings (prefix typed by the
++  /// user + completion suffix), e.g. \c "remove(at:" from \c "remov".
++  /// \p Prefix is the partial identifier the user typed; callers use
++  /// \c cursor_start = cursor_pos - Prefix.size() to define the replacement
++  /// region passed back to the Jupyter \c complete_reply.
++  struct CompletionResult {
++    std::vector<std::string> Matches;
++    std::string Prefix;
++  };
++
++  /// Compute completions for \p Code (text up to the cursor).
++  ///
++  /// Uses Swift's REPL code-completion engine internally.  Safe to call at any
++  /// point in the session; diagnostics generated during completion are
++  /// suppressed and do not affect subsequent executions.
++  CompletionResult complete(llvm::StringRef Code) const;
++};
++
++} // namespace swift
++
++#endif // SWIFT_IMMEDIATE_INTERPRETER_H
+diff --git a/include/swift/Immediate/SwiftMaterializationUnit.h b/include/swift/Immediate/SwiftMaterializationUnit.h
+index b636749..f5fc4e1 100644
+--- a/include/swift/Immediate/SwiftMaterializationUnit.h
++++ b/include/swift/Immediate/SwiftMaterializationUnit.h
+@@ -79,6 +79,16 @@ public:
+   /// Get the `ObjectTransformLayer` associated with this `SwiftJIT`
+   llvm::orc::ObjectTransformLayer &getObjTransformLayer();
+ 
++  /// Add a compiled LLVM IR module to the main JITDylib.  All public symbols
++  /// in the module are registered and lazily compiled on first lookup.
++  llvm::Error addIRModule(llvm::orc::ThreadSafeModule TSM);
++
++  /// Look up a symbol in the main JITDylib by its *IR-level* (un-prefixed)
++  /// name, e.g. "$s8__repl_1AAyyF" for @convention(thin) () -> Void wrapper.
++  /// Triggers JIT compilation of the owning module on first call.
++  /// Returns the executor address of the symbol; call toPtr<FnTy>() on it.
++  llvm::Expected<llvm::orc::ExecutorAddr> lookup(llvm::StringRef Name);
++
+   /// Initialize the main `JITDylib`, lookup the main symbol, execute it,
+   /// deinitialize the main `JITDylib`, and return the exit code of the
+   /// JIT'd program
+diff --git a/include/swift/SIL/SILBridging.h b/include/swift/SIL/SILBridging.h
+index 09cfdc5..08c57e3 100644
+--- a/include/swift/SIL/SILBridging.h
++++ b/include/swift/SIL/SILBridging.h
+@@ -561,6 +561,7 @@ struct BridgedFunction {
+     Interface,
+     MacroExpansion,
+     DefaultArgument, // must match swift::SourceFileKind::DefaultArgument
++    REPL,            // must match swift::SourceFileKind::REPL
+     None
+   };
+ 
+diff --git a/lib/AST/AvailabilityScope.cpp b/lib/AST/AvailabilityScope.cpp
+index fe00416..1cbce59 100644
+--- a/lib/AST/AvailabilityScope.cpp
++++ b/lib/AST/AvailabilityScope.cpp
+@@ -114,6 +114,7 @@ AvailabilityScope::createForSourceFile(SourceFile *SF,
+   case SourceFileKind::Library:
+   case SourceFileKind::Main:
+   case SourceFileKind::Interface:
++  case SourceFileKind::REPL:
+     break;
+   case SourceFileKind::SIL:
+     llvm_unreachable("unexpected SourceFileKind");
+diff --git a/lib/AST/AvailabilityScopeBuilder.cpp b/lib/AST/AvailabilityScopeBuilder.cpp
+index a7e7684..5705b44 100644
+--- a/lib/AST/AvailabilityScopeBuilder.cpp
++++ b/lib/AST/AvailabilityScopeBuilder.cpp
+@@ -1375,6 +1375,7 @@ AvailabilityScope *AvailabilityScope::getOrBuildForSourceFile(SourceFile &SF) {
+   case SourceFileKind::Main:
+   case SourceFileKind::Interface:
+   case SourceFileKind::SyntheticMacro:
++  case SourceFileKind::REPL:
+     break;
+   }
+   ASTContext &ctx = SF.getASTContext();
+diff --git a/lib/AST/Module.cpp b/lib/AST/Module.cpp
+index d0aa8ed..ddd92d6 100644
+--- a/lib/AST/Module.cpp
++++ b/lib/AST/Module.cpp
+@@ -3674,6 +3674,17 @@ void SourceFile::prependTopLevelDecl(Decl *d) {
+   ctx.evaluator.clearCachedOutput(ParseTopLevelDeclsRequest{mutableThis});
+ }
+ 
++void SourceFile::replaceTopLevelItems(ArrayRef<ASTNode> newItems) {
++  // Force decl parsing if we haven't already.
++  (void)getTopLevelItems();
++  *Items = std::vector<ASTNode>(newItems.begin(), newItems.end());
++
++  // FIXME: This violates core properties of the evaluator.
++  auto &ctx = getASTContext();
++  auto *mutableThis = const_cast<SourceFile *>(this);
++  ctx.evaluator.clearCachedOutput(ParseTopLevelDeclsRequest{mutableThis});
++}
++
+ void SourceFile::addDelayedFunction(AbstractFunctionDecl *AFD) {
+   // If we defer type checking to runtime, we won't
+   // have to type check `AFD` ahead of time
+diff --git a/lib/AST/TypeCheckRequests.cpp b/lib/AST/TypeCheckRequests.cpp
+index ada0d67..47eb127 100644
+--- a/lib/AST/TypeCheckRequests.cpp
++++ b/lib/AST/TypeCheckRequests.cpp
+@@ -2895,6 +2895,7 @@ UniqueUnderlyingTypeSubstitutionsRequest::evaluate(
+         return true;
+       case SourceFileKind::Main:
+       case SourceFileKind::Library:
++      case SourceFileKind::REPL:
+         // Don't typecheck bodies in auxiliary source files.
+         return false;
+       }
+diff --git a/lib/ASTGen/Sources/ASTGen/ASTGen.swift b/lib/ASTGen/Sources/ASTGen/ASTGen.swift
+index f973365..6bd53f2 100644
+--- a/lib/ASTGen/Sources/ASTGen/ASTGen.swift
++++ b/lib/ASTGen/Sources/ASTGen/ASTGen.swift
+@@ -81,7 +81,7 @@ struct ASTGenVisitor {
+       }
+ 
+       // Diagnose top-level code in non-script files.
+-      if !declContext.parentSourceFile.isScriptMode {
++      if !declContext.parentSourceFile.allowsTopLevelCode {
+         switch astNode.kind {
+         case .stmt:
+           self.diagnose(.illegalTopLevelStmt(node))
+@@ -132,7 +132,7 @@ struct ASTGenVisitor {
+           }
+ 
+           // In non-script files, macro expansion at top-level must be a decl.
+-          if !declContext.parentSourceFile.isScriptMode {
++          if !declContext.parentSourceFile.allowsTopLevelCode {
+             return withDeclContext(parentDC) {
+               return .decl(self.generateMacroExpansionDecl(macroExpansionExpr: node).asDecl)
+             }
+diff --git a/lib/FrontendTool/FrontendTool.cpp b/lib/FrontendTool/FrontendTool.cpp
+index 61e51a6..d31b0e0 100644
+--- a/lib/FrontendTool/FrontendTool.cpp
++++ b/lib/FrontendTool/FrontendTool.cpp
+@@ -1459,9 +1459,10 @@ static bool performAction(CompilerInstance &Instance, int &ReturnValue,
+     return printSwiftVersion(Instance.getInvocation());
+   case FrontendOptions::ActionType::PrintArguments:
+     return printSwiftArguments(Instance);
+-  case FrontendOptions::ActionType::REPL:
+-    llvm::report_fatal_error("Compiler-internal integrated REPL has been "
+-                             "removed; use the LLDB-enhanced REPL instead.");
++  case FrontendOptions::ActionType::REPL: {
++    runREPL(Instance, ProcessCmdLine(CommandLineArgs.begin(), CommandLineArgs.end()), Instance.getInvocation().getParseStdlib());
++    return Instance.getASTContext().hadError();
++  }
+ 
+   // MARK: Actions for Clang and Clang Modules
+   case FrontendOptions::ActionType::EmitPCH:
+diff --git a/lib/Immediate/CMakeLists.txt b/lib/Immediate/CMakeLists.txt
+index bde47a6..d92ccfd 100644
+--- a/lib/Immediate/CMakeLists.txt
++++ b/lib/Immediate/CMakeLists.txt
+@@ -1,15 +1,18 @@
++if(EMSCRIPTEN)
++  find_package(LLD REQUIRED CONFIG)
++  set(executor_sources WasmExecutor.cpp)
++  set(executor_components codegen transformutils)
++else()
++  set(executor_sources SwiftMaterializationUnit.cpp)
++  set(executor_components executionengine orcjit orctargetprocess jitlink transformutils)
++endif()
+ add_swift_host_library(swiftImmediate STATIC
+-  SwiftMaterializationUnit.cpp
+-  Immediate.cpp
+-  LLVM_LINK_COMPONENTS
+-    executionengine
+-    orcjit
+-    orctargetprocess
+-    jitlink
+-    transformutils)
++  ${executor_sources}
++  Immediate.cpp Interpreter.cpp REPLTransforms.cpp
++  LLVM_LINK_COMPONENTS ${executor_components})
+ target_link_libraries(swiftImmediate PRIVATE
+-  swiftFrontend
+-  swiftIDE
+-  swiftIRGen
+-  swiftSILGen
+-  swiftSILOptimizer)
++  swiftFrontend swiftIDE swiftIRGen swiftSILGen swiftSILOptimizer)
++if(EMSCRIPTEN)
++  target_include_directories(swiftImmediate PRIVATE ${LLD_INCLUDE_DIRS})
++  target_link_libraries(swiftImmediate PRIVATE lldWasm lldCommon)
++endif()
+diff --git a/lib/Immediate/Immediate.cpp b/lib/Immediate/Immediate.cpp
+index 35104f5..9259e6b 100644
+--- a/lib/Immediate/Immediate.cpp
++++ b/lib/Immediate/Immediate.cpp
+@@ -16,8 +16,11 @@
+ //===----------------------------------------------------------------------===//
+ 
+ #include "swift/Immediate/Immediate.h"
++#include "swift/Immediate/Interpreter.h"
+ #include "ImmediateImpl.h"
++#ifndef __EMSCRIPTEN__
+ #include "swift/Immediate/SwiftMaterializationUnit.h"
++#endif
+ 
+ #include "swift/AST/ASTContext.h"
+ #include "swift/AST/DiagnosticsFrontend.h"
+@@ -37,6 +40,9 @@
+ #include "llvm/IR/LLVMContext.h"
+ #include "llvm/Support/Path.h"
+ 
++#include <iostream>
++#include <string>
++
+ // TODO: Replace pass manager
+ //       Removed in: d623b2f95fd559901f008a0588dddd0949a8db01
+ /* #include "llvm/Transforms/IPO/PassManagerBuilder.h" */
+@@ -92,6 +98,12 @@ void *swift::immediate::loadSwiftRuntime(ArrayRef<std::string>
+ 
+ static bool tryLoadLibrary(LinkLibrary linkLib,
+                            SearchPathOptions searchPathOpts) {
++#ifdef __EMSCRIPTEN__
++  // These libraries are statically linked and exported by the browser host.
++  if (linkLib.getName() == "swiftCore" ||
++      linkLib.getName() == "swiftSwiftOnoneSupport")
++    return true;
++#endif
+   llvm::SmallString<128> path = linkLib.getName();
+ 
+   // If we have an absolute or relative path, just try to load it now.
+@@ -251,6 +263,7 @@ static void logError(llvm::Error Err) {
+   logAllUnhandledErrors(std::move(Err), llvm::errs(), "");
+ }
+ 
++#ifndef __EMSCRIPTEN__
+ int swift::RunImmediately(CompilerInstance &CI, const ProcessCmdLine &CmdLine,
+                           const IRGenOptions &IRGenOpts,
+                           const SILOptions &SILOpts,
+@@ -431,3 +444,60 @@ int swift::RunImmediatelyFromAST(CompilerInstance &CI) {
+ 
+   return *Result;
+ }
++
++#endif
++
++// ── Interactive REPL entry point ─────────────────────────────────────────────
++//
++// This is the driver-facing entry point called by FrontendTool::performAction()
++// for the ActionType::REPL case.  Creates a swift::Interpreter and runs the
++// traditional read-eval-print loop.
++//
++// Embedders such as xeus-swift bypass this entirely: they construct a
++// swift::Interpreter directly and call parseAndExecute() per input cell.
++
++void swift::runREPL(CompilerInstance &CI, const ProcessCmdLine &CmdLine,
++                    bool ParseStdlib) {
++  Interpreter Env(CI, CmdLine, ParseStdlib);
++  if (CI.getASTContext().hadError())
++    return;
++
++  llvm::outs() << "Welcome to Swift REPL.\n"
++               << "Type ':quit' to exit.\n\n";
++
++  std::string AccumulatedInput;
++  std::string Line;
++  while (true) {
++    // Show the primary prompt when starting a new cell, continuation prompt
++    // when awaiting more input for an incomplete statement.
++    if (AccumulatedInput.empty())
++      llvm::outs() << Env.getInputNumber() << "> ";
++    else
++      llvm::outs() << "  ... ";
++    llvm::outs().flush();
++
++    if (!std::getline(std::cin, Line))
++      break; // EOF (Ctrl+D)
++
++    // Skip blank lines only at the start of a new cell.
++    if (AccumulatedInput.empty() && llvm::StringRef(Line).trim().empty())
++      continue;
++
++    AccumulatedInput += Line;
++    AccumulatedInput += "\n";
++
++    // Check whether the accumulated text forms a complete Swift statement.
++    // If not, show the continuation prompt and wait for more input.
++    auto Completeness = Env.isInputComplete(AccumulatedInput);
++    if (!Completeness.IsComplete)
++      continue;
++
++    if (Env.parseAndExecute(AccumulatedInput) ==
++        swift::Interpreter::REPLResult::Fatal)
++      break;
++
++    AccumulatedInput.clear();
++  }
++
++  llvm::outs() << "\n";
++}
+diff --git a/lib/Immediate/Interpreter.cpp b/lib/Immediate/Interpreter.cpp
+new file mode 100644
+index 0000000..2287d8b
+--- /dev/null
++++ b/lib/Immediate/Interpreter.cpp
+@@ -0,0 +1,529 @@
++//===--- Interpreter.cpp - Swift incremental REPL interpreter -------------===//
++//
++// This source file is part of the Swift.org open source project
++//
++// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
++// Licensed under Apache License v2.0 with Runtime Library Exception
++//
++// See https://swift.org/LICENSE.txt for license information
++// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
++//
++//===----------------------------------------------------------------------===//
++
++#include "swift/Immediate/Interpreter.h"
++#include "REPLTransforms.h"
++#include "ImmediateImpl.h"
++#include "swift/Immediate/Immediate.h"
++#ifdef __EMSCRIPTEN__
++#include "WasmExecutor.h"
++#else
++#include "swift/Immediate/SwiftMaterializationUnit.h"
++#endif
++#include "swift/AST/ASTContext.h"
++#include "swift/AST/DiagnosticsFrontend.h"
++#include "swift/AST/IRGenOptions.h"
++#include "swift/AST/IRGenRequests.h"
++#include "swift/AST/Import.h"
++#include "swift/AST/Module.h"
++#include "swift/AST/SourceFile.h"
++#include "swift/AST/TBDGenRequests.h"
++#include "swift/Frontend/Frontend.h"
++#include "swift/AST/DiagnosticSuppression.h"
++#include "swift/Basic/InitializeSwiftModules.h"
++#include "swift/IDE/REPLCodeCompletion.h"
++#include "swift/IDE/Utils.h"
++#include "swift/SIL/SILBridging.h"
++#include "swift/SIL/SILDeclRef.h"
++#include "swift/SIL/SILModule.h"
++#include "swift/Subsystems.h"
++#include "swift/SILOptimizer/PassManager/Passes.h"
++#include "llvm/Support/Error.h"
++#include "llvm/Support/raw_ostream.h"
++#include <mutex>
++
++#if defined(_WIN32)
++#define WIN32_LEAN_AND_MEAN
++#define NOMINMAX
++#include <windows.h>
++#else
++#include <dlfcn.h>
++#endif
++
++#include <string>
++
++using namespace swift;
++
++/// Result of type-checking a single REPL input cell.
++struct REPLInputResults {
++  ModuleDecl *Module;
++  SourceFile *InputFile;
++  /// The synthesized __repl_N() wrapper function. Use SILDeclRef(WrapperFunc)
++  /// to compute the Swift-mangled symbol name for JIT lookup.
++  FuncDecl *WrapperFunc;
++};
++
++/// Type-check a single REPL input cell, creating a new ModuleDecl for it.
++///
++/// Each cell gets its own ModuleDecl, which implicitly imports the previous
++/// module so that declarations are visible across cells.  User-written imports
++/// (e.g. 'import Foundation') from the previous module are carried forward as
++/// exported imports so they remain in scope in later cells.
++static REPLInputResults
++typeCheckREPLInput(ModuleDecl *MostRecentModule, StringRef Name,
++                   std::unique_ptr<llvm::MemoryBuffer> Buffer) {
++  assert(MostRecentModule);
++  ASTContext &Ctx = MostRecentModule->getASTContext();
++
++  // Build implicit imports: stdlib + the previous REPL module + its imports.
++  ImplicitImportInfo importInfo;
++  importInfo.StdlibKind = ImplicitStdlibKind::Stdlib;
++
++  // Import the previous REPL module.
++  importInfo.AdditionalImports.emplace_back(
++      AttributedImport<ImportedModule>(ImportedModule(MostRecentModule)));
++
++  // TODO: Once we want 'internal' declarations to be visible across cells
++  // without requiring 'public', switch to a @testable import instead:
++  //   importInfo.AdditionalImports.emplace_back(AttributedImport<ImportedModule>(
++  //       ImportedModule(MostRecentModule), SourceLoc(),
++  //       ImportOptions({ImportFlags::Testable})));
++  // and call REPLModule->setTestingEnabled(true) after module creation.
++
++  // Carry over all locally-written imports from the previous module
++  // (e.g. user-written 'import Foundation') so they remain visible.
++  // We use getImportFilterLocal() to capture every import kind the user
++  // could write: @_exported, regular public (Default), @_implementationOnly,
++  // package, internal/fileprivate/private, and @_spiOnly.  In particular
++  // 'import Foundation' is a Default (public) import and would be silently
++  // dropped if we only queried InternalOrBelow.
++  SmallVector<ImportedModule, 8> imports;
++  MostRecentModule->getImportedModules(
++      imports, ModuleDecl::getImportFilterLocal());
++  for (auto &import : imports) {
++    importInfo.AdditionalImports.emplace_back(AttributedImport<ImportedModule>(
++        import, SourceLoc(), ImportOptions({ImportFlags::Exported})));
++  }
++
++  auto BufferID = Ctx.SourceMgr.addNewSourceBuffer(std::move(Buffer));
++
++  // Create a new module for this REPL input, with the source file
++  // created inside the PopulateFilesFn lambda.
++  SourceFile *REPLInputFile = nullptr;
++  auto *REPLModule = ModuleDecl::create(
++      Ctx.getIdentifier(Name), Ctx, importInfo,
++      [&](ModuleDecl *M, llvm::function_ref<void(FileUnit *)> addFile) {
++        REPLInputFile = new (Ctx) SourceFile(
++            *M, SourceFileKind::REPL, BufferID,
++            SourceFile::ParsingFlags::DisableDelayedBodies);
++        addFile(REPLInputFile);
++      });
++
++  assert(REPLInputFile && "PopulateFilesFn should have created the SourceFile");
++
++  // Run the frontend pipeline: import resolution, extension binding,
++  // and type checking.
++  performImportResolution(*REPLInputFile);
++  bindExtensions(*REPLModule);
++  performTypeChecking(*REPLInputFile);
++
++  // AST transform: collect any top-level executable statements into a
++  // single __repl_N() function.  Pure-declaration inputs get an empty stub.
++  FuncDecl *WrapperFD = wrapTopLevelCodeInFunction(*REPLInputFile, Name);
++
++  // AST transform: promote every declaration in this cell to public/open so
++  // the JIT can resolve them and later cells can reference them by name.
++  // Must run after wrapTopLevelCodeInFunction() so the synthesised wrapper
++  // function is also walked (it is already Public, so the walk is a no-op on
++  // it, but the user's own declarations -- structs, classes, lets, vars -- get
++  // their access raised here).
++  makeDeclarationsPublic(*REPLInputFile);
++
++  return {REPLModule, REPLInputFile, WrapperFD};
++}
++
++// ── Interpreter implementation ────────────────────────────────────────────────
++
++Interpreter::Interpreter(CompilerInstance &CI,
++                         const ProcessCmdLine &CmdLine,
++                         bool ParseStdlib)
++    : CI(CI), MostRecentModule(CI.getMainModule()) {
++
++  // Ensure Swift-in-Swift optimizer passes (e.g. LifetimeCompletion,
++  // SILGenCleanup utilities) are registered exactly once per process.
++  // In the standalone swift-frontend binary this is called from driver.cpp,
++  // but when Interpreter is used as a library (xeus-swift kernel) no driver
++  // startup code runs, so we must call it here.
++  // Guard with swiftModulesInitialized() so we don't double-register when
++  // driver.cpp has already called initializeSwiftModules() before us.
++  {
++    static std::once_flag s_initSwiftModulesOnce;
++    std::call_once(s_initSwiftModulesOnce, []() {
++      if (!swiftModulesInitialized())
++        initializeSwiftModules();
++    });
++  }
++
++  ASTContext &Ctx = CI.getASTContext();
++  const auto &IRGenOpts = CI.getInvocation().getIRGenOptions();
++
++  // ── Step 1: Load libswiftCore into the host process ──────────────────────
++  //
++  // This MUST happen before SwiftJIT::Create, because the JIT installs a
++  // DynamicLibrarySearchGenerator that forwards unresolved symbol lookups to
++  // the host process's dynamic linker.  Every JIT'd cell that calls into the
++  // Swift runtime (swift_retain, swift_release, swift_once, _swift_stdlib_*,
++  // print(), etc.) resolves its symbols through that generator.  If
++  // libswiftCore is not in the process at JIT-link time, all those calls will
++  // produce "symbol not found" errors at runtime.
++  //
++  // ParseStdlib == true means we are building the stdlib itself (the
++  // -parse-stdlib frontend flag).  In that case libswiftCore does not exist
++  // yet, so we must skip this step -- and the warmup below -- entirely.
++  if (!ParseStdlib) {
++#if defined(_WIN32)
++    auto *stdlib =
++        swift::immediate::loadSwiftRuntime(Ctx.SearchPathOpts.RuntimeLibraryPaths);
++    if (!stdlib) {
++      CI.getDiags().diagnose(SourceLoc(),
++                             diag::error_immediate_mode_missing_stdlib);
++      return;
++    }
++#else
++    // On non-Windows, swift-frontend is often a Swift binary and already
++    // has libswiftCore linked in.  Check for a known runtime symbol before
++    // attempting a second dlopen.
++    if (!dlsym(RTLD_DEFAULT, "swift_retain")) {
++      dlerror(); // clear stale error from the failed dlsym
++      auto *stdlib = swift::immediate::loadSwiftRuntime(
++          Ctx.SearchPathOpts.RuntimeLibraryPaths);
++      if (!stdlib) {
++        CI.getDiags().diagnose(SourceLoc(),
++                               diag::error_immediate_mode_missing_stdlib);
++        return;
++      }
++    }
++#endif
++  }
++
++  // ── Step 2: Autolink any libraries the main module depends on ────────────
++  //
++  // autolinkImportedModules walks IRGenOpts.LinkLibraries plus the set of
++  // modules that the given ModuleDecl imports, and calls dlopen for each.
++  // At REPL startup the main module is empty (no cells parsed yet), so this
++  // primarily picks up command-line -l flags from IRGenOpts.LinkLibraries.
++  // Per-cell imports (e.g. `import Foundation`) are handled in parseAndExecute
++  // after each cell's type-checking.
++  if (swift::immediate::autolinkImportedModules(CI.getMainModule(), IRGenOpts)) {
++    llvm::errs() << "[REPL] error: autolinkImportedModules failed\n";
++    return;
++  }
++
++  // ── Step 3: Create the JIT session ───────────────────────────────────────
++  //
++  // SwiftJIT wraps an ORC LLJIT with:
++  //   - JITTargetMachineBuilder configured from IRGenOpts (target triple,
++  //     CPU, features, relocation model PIC)
++  //   - DynamicLibrarySearchGenerator for the host process, so any symbol
++  //     dlopen'd in Steps 1-2 is visible to JIT'd code
++  //   - EPCIndirectionUtils + LazyCallThroughManager for future lazy
++  //     compilation support (not used in eager REPL mode)
++  // The session lives for the entire REPL lifetime; all cells share the
++  // same main JITDylib, so declarations from cell N are visible in cell N+1.
++#ifdef __EMSCRIPTEN__
++  auto JITOrErr = SwiftWasmExecutor::Create(Ctx.SearchPathOpts.RuntimeResourcePath);
++#else
++  auto JITOrErr = SwiftJIT::Create(CI);
++#endif
++  if (auto Err = JITOrErr.takeError()) {
++    logAllUnhandledErrors(std::move(Err), llvm::errs());
++    return;
++  }
++  JIT = std::move(*JITOrErr);
++
++  // ── Step 4: Stdlib type-checker warmup ───────────────────────────────────
++  //
++  // ParseStdlib == false is the normal case (we are NOT building the stdlib).
++  // Parsing a trivial statement forces the Swift type-checker to lazily load
++  // all stdlib AST nodes upfront, so the first real user input does not
++  // incur an unexpected pause.  This is a type-check-only step; the warmup
++  // cell is intentionally NOT JIT-compiled or executed.
++  if (!ParseStdlib) {
++    static const char WarmUpStmt[] = "Void()\n";
++    auto Buffer = llvm::MemoryBuffer::getMemBufferCopy(
++        WarmUpStmt, "<REPL Initialization>");
++    (void)typeCheckREPLInput(MostRecentModule, "__Warmup", std::move(Buffer));
++    if (Ctx.hadError()) {
++      llvm::errs() << "[REPL] error: stdlib warmup failed\n";
++      return;
++    }
++  }
++}
++
++Interpreter::~Interpreter() = default;
++
++Interpreter::InputCompleteness
++Interpreter::isInputComplete(llvm::StringRef Text) const {
++  // Use the Swift parser to determine whether Text is syntactically complete.
++  // isSourceInputComplete() creates a throwaway ParserUnit, runs the parser
++  // on Text, and returns whether any bracket/brace/paren is still open.
++  const auto &LangOpts = CI.getASTContext().LangOpts;
++  auto Result =
++      ide::isSourceInputComplete(Text, SourceFileKind::REPL, LangOpts);
++  return {Result.IsComplete, Result.IndentPrefix, Result.IndentLevel};
++}
++
++Interpreter::CompletionResult
++Interpreter::complete(llvm::StringRef Code) const {
++  // Suppress diagnostics for the duration of this call so that partial/
++  // erroneous input during a completion probe does not surface as errors.
++  DiagnosticSuppression Suppression(CI.getASTContext().Diags);
++
++  // Pass a source file from MostRecentModule — not CI.getMainModule() — so
++  // that declarations from previously-executed cells are in scope.  Each cell
++  // module imports the previous one (see typeCheckREPLInput), so
++  // MostRecentModule has transitive access to all prior declarations.
++  SourceFile *SF = nullptr;
++  for (auto *F : MostRecentModule->getFiles()) {
++    if (auto *Src = llvm::dyn_cast<SourceFile>(F)) {
++      SF = Src;
++      break;
++    }
++  }
++  if (!SF)
++    return {};
++
++  swift::REPLCompletions Completions;
++  Completions.populate(*SF, Code);
++
++  CompletionResult Result;
++  Result.Prefix = Completions.getPrefix().str();
++
++  // Build fully-insertable completion strings: prefix typed by the user +
++  // the suffix recommended by the engine.
++  llvm::StringRef Prefix = Completions.getPrefix();
++  for (auto &Cooked : Completions.getCookedResults())
++    Result.Matches.push_back((Prefix + Cooked.InsertableString).str());
++
++  return Result;
++}
++
++void Interpreter::setLastValueDisplayFunc(std::string funcName) {
++  DisplayFunc = std::move(funcName);
++}
++
++bool Interpreter::loadLibrary(llvm::StringRef path) {
++#if defined(_WIN32)
++  if (LoadLibraryA(path.str().c_str()))
++    return true;
++  llvm::errs() << "Interpreter::loadLibrary: failed to load '" << path << "'\n";
++  return false;
++#else
++  if (dlopen(path.str().c_str(), RTLD_LAZY | RTLD_GLOBAL))
++    return true;
++  llvm::errs() << "Interpreter::loadLibrary: " << dlerror() << "\n";
++  return false;
++#endif
++}
++
++Interpreter::REPLResult Interpreter::parseAndExecute(llvm::StringRef Line) {
++  ASTContext &Ctx = CI.getASTContext();
++
++  // Bail out if JIT setup failed during construction.
++  if (!JIT) {
++    llvm::errs() << "REPL: JIT unavailable\n";
++    return REPLResult::Fatal;
++  }
++
++  // Check for quit commands.
++  llvm::StringRef Trimmed = Line.trim();
++  if (Trimmed == ":quit" || Trimmed == ":exit" || Trimmed == ":q")
++    return REPLResult::Fatal;
++
++  // Reset error state from previous input.
++  Ctx.Diags.resetHadAnyError();
++
++  // Create a unique module name for this input.
++  SmallString<16> Name;
++  llvm::raw_svector_ostream(Name) << "__repl_" << InputNumber;
++
++  // Typecheck the original input.  After typeChecking,
++  // wrapTopLevelCodeInFunction has already run and populated the wrapper body:
++  //   - declarations (let/func/struct/…) → empty wrapper body
++  //   - void-returning calls (print(x)) → wrapper body has a ()-typed Expr*
++  //   - bare value expressions (1+1, x) → wrapper body has a non-Void Expr*
++  // This lets us cheaply detect the auto-print case without a speculative
++  // probe typecheck on every declaration the user enters.
++  bool IsBareExpr = false;
++  auto Buffer = llvm::MemoryBuffer::getMemBufferCopy(Line, Name);
++  auto Result = typeCheckREPLInput(MostRecentModule, Name, std::move(Buffer));
++
++  if (Ctx.hadError()) {
++    // Non-fatal compile error (type-check failure etc.).
++    // Diagnostics have already been emitted to any registered consumers.
++    // Flush them now so the Swift-style PrintingDiagnosticConsumer releases
++    // any output queued in DiagnosticBridge (it normally waits for the next
++    // error before printing, which causes delayed output in a REPL).
++    Ctx.Diags.resetHadAnyError();
++    Ctx.Diags.flushConsumers();
++    return REPLResult::CompileError;
++  }
++
++  // If the wrapper body has a single non-Void expression, re-typecheck with
++  // auto-print injected so the result is displayed to the user.
++  //
++  // If the embedder registered a last-value display function via
++  // setLastValueDisplayFunc(name), call it instead of Swift.print.  The
++  // function must provide two overloads — one constrained on the rich-display
++  // protocol, one unconstrained fallback — so Swift resolves the correct one at
++  // typecheck time (concrete type is always known in the wrapper).  If the
++  // function is not yet in scope, DiagnosticSuppression discards the typecheck
++  // error and the expression executes without output.
++  if (hasSingleNonVoidBareExpr(Result.WrapperFunc)) {
++    std::string WrappedInput;
++    llvm::raw_string_ostream WOS(WrappedInput);
++    WOS << "let __repl_r" << ResultIdx << " = (" << Line << ")\n";
++    if (!DisplayFunc.empty()) {
++      // Call the two-overload display function.  Swift resolves the correct
++      // overload — constrained (rich display) or unconstrained (Swift.print
++      // fallback) — at typecheck time.  No runtime conformance lookup, no
++      // as? cast, no extra pass.
++      WOS << DisplayFunc << "(__repl_r" << ResultIdx
++          << ", \"$R" << ResultIdx << "\")";
++    } else {
++      WOS << "Swift.print(\"$R" << ResultIdx
++          << ": \\(Swift.type(of: __repl_r" << ResultIdx << ")) = "
++          << "\\(String(reflecting: __repl_r" << ResultIdx << "))\")";
++    }
++    DiagnosticSuppression Suppress(Ctx.Diags);
++    Ctx.Diags.resetHadAnyError();
++    auto WrappedBuf =
++        llvm::MemoryBuffer::getMemBufferCopy(WrappedInput, Name);
++    auto Wrapped =
++        typeCheckREPLInput(MostRecentModule, Name, std::move(WrappedBuf));
++    if (!Ctx.hadError()) {
++      Result = Wrapped;
++      IsBareExpr = true;
++    }
++    Ctx.Diags.resetHadAnyError();
++  }
++
++  // Autolink any libraries introduced by this cell's imports (e.g.
++  // `import Foundation` in cell N triggers dlopen of libswiftFoundation so
++  // the JIT can resolve Foundation symbols when compiling cell N+1).
++  const auto &IRGenOpts = CI.getInvocation().getIRGenOptions();
++  swift::immediate::autolinkImportedModules(Result.Module, IRGenOpts);
++
++  // Compute the linker-level symbol name for __repl_N() now, while we still
++  // hold the FuncDecl pointer and before the SILModule consumes it.
++  std::string SILMangledName = SILDeclRef(Result.WrapperFunc).mangle();
++
++  // ── Step 5: SIL lowering ──────────────────────────────────────────────
++  auto SILMod = performASTLowering(*Result.InputFile,
++                                   CI.getSILTypes(),
++                                   CI.getSILOptions());
++
++  if (runSILDiagnosticPasses(*SILMod) || Ctx.hadError()) {
++    Ctx.Diags.resetHadAnyError();
++    Ctx.Diags.flushConsumers();
++    return REPLResult::CompileError;
++  }
++
++  // Run SIL performance optimizations when the user asked for them (-O / -Osize).
++  // Must run BEFORE runSILLoweringPasses: the perf pipeline (PerformanceSILLinker,
++  // inlining, generic specialisation, ARC elimination, etc.) operates on
++  // canonical SIL and tries to deserialize function bodies from imported modules.
++  // runSILLoweringPasses advances the module stage to Lowered; after that point
++  // SILDeserializer refuses to load any more SIL into the module
++  // ("cannot deserialize into a module that has entered Lowered stage").
++  //
++  // Correct order mirrors performCompileStepsPostSILGen in the real compiler:
++  //   runSILDiagnosticPasses  → runSILOptimizationPasses → runSILLoweringPasses
++  //
++  // LLDB's SwiftExpressionParser hardcodes NoOptimization unconditionally;
++  // this block is what gives our ORC JIT REPL a concrete performance advantage
++  // over the LLDB REPL when -O is requested.
++  if (CI.getSILOptions().shouldOptimize()) {
++    // The full performance pipeline contains a SerializeSILPass that asserts a
++    // serialization action is set — that action exists only in whole-module
++    // compilation, not in JIT mode.  Install a no-op callback so the pass
++    // runs (and safely does nothing) instead of crashing.
++    SILMod->setSerializeSILAction([](){});
++    runSILOptimizationPasses(*SILMod);
++  }
++
++  if (Ctx.hadError()) {
++    Ctx.Diags.resetHadAnyError();
++    Ctx.Diags.flushConsumers();
++    return REPLResult::CompileError;
++  }
++
++  runSILLoweringPasses(*SILMod);
++
++  if (Ctx.hadError()) {
++    Ctx.Diags.resetHadAnyError();
++    Ctx.Diags.flushConsumers();
++    return REPLResult::CompileError;
++  }
++
++  // ── Step 6: IRGen ─────────────────────────────────────────────────────
++  const auto &TBDOpts = CI.getInvocation().getTBDGenOptions();
++  const auto PSPs = CI.getPrimarySpecificPathsForAtMostOnePrimary();
++
++  auto GenModule = performIRGeneration(
++      Result.Module, IRGenOpts, TBDOpts, std::move(SILMod),
++      Name.str(), PSPs, /*CAS=*/nullptr,
++      /*parallelOutputFilenames=*/ArrayRef<std::string>(),
++      /*parallelIROutputFilenames=*/ArrayRef<std::string>());
++
++  if (Ctx.hadError()) {
++    Ctx.Diags.resetHadAnyError();
++    Ctx.Diags.flushConsumers();
++    return REPLResult::CompileError;
++  }
++  assert(GenModule && "IR generation succeeded without emitting a module?");
++
++  auto *LLVMModule = GenModule.getModule();
++  performLLVMOptimizations(IRGenOpts, Ctx.Diags, /*diagMutex=*/nullptr,
++                           LLVMModule, GenModule.getTargetMachine(),
++                           Ctx.SourceMgr.getFileSystem(),
++                           /*out=*/nullptr);
++
++  if (Ctx.hadError()) {
++    Ctx.Diags.resetHadAnyError();
++    Ctx.Diags.flushConsumers();
++    return REPLResult::CompileError;
++  }
++
++  // ── Step 7: JIT add + execute ─────────────────────────────────────────
++#ifdef __EMSCRIPTEN__
++  if (auto Err = JIT->executeModule(LLVMModule, SILMangledName)) {
++    logAllUnhandledErrors(std::move(Err), llvm::errs());
++    return REPLResult::Fatal;
++  }
++#else
++  auto TSM = std::move(GenModule).intoThreadSafeContext();
++  if (auto Err = JIT->addIRModule(std::move(TSM))) {
++    logAllUnhandledErrors(std::move(Err), llvm::errs());
++    return REPLResult::CompileError;
++  }
++
++  auto Sym = JIT->lookup(SILMangledName);
++  if (!Sym) {
++    logAllUnhandledErrors(Sym.takeError(), llvm::errs());
++    return REPLResult::CompileError;
++  }
++
++  auto *Fn = Sym->toPtr<void (*)()>();
++  Fn();
++
++#endif
++
++  MostRecentModule = Result.Module;
++
++  if (IsBareExpr)
++    ++ResultIdx;
++
++  ++InputNumber;
++  Ctx.Diags.flushConsumers();
++  return REPLResult::Success;
++}
+diff --git a/lib/Immediate/REPLTransforms.cpp b/lib/Immediate/REPLTransforms.cpp
+new file mode 100644
+index 0000000..94b8351
+--- /dev/null
++++ b/lib/Immediate/REPLTransforms.cpp
+@@ -0,0 +1,172 @@
++//===--- REPLTransforms.cpp - AST transforms for the Swift REPL -----------===//
++//
++// This source file is part of the Swift.org open source project
++//
++// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
++// Licensed under Apache License v2.0 with Runtime Library Exception
++//
++// See https://swift.org/LICENSE.txt for license information
++// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
++//
++//===----------------------------------------------------------------------===//
++
++#include "REPLTransforms.h"
++#include "swift/AST/ASTContext.h"
++#include "swift/AST/ASTNode.h"
++#include "swift/AST/ASTWalker.h"
++#include "swift/AST/Attr.h"
++#include "swift/AST/Decl.h"
++#include "swift/AST/Expr.h"
++#include "swift/AST/ParameterList.h"
++#include "swift/AST/SourceFile.h"
++#include "swift/AST/Stmt.h"
++#include "swift/AST/Types.h"
++#include "llvm/ADT/STLExtras.h"
++
++using namespace swift;
++
++FuncDecl *swift::wrapTopLevelCodeInFunction(SourceFile &SF, StringRef funcName) {
++  ASTContext &Ctx = SF.getASTContext();
++
++  // Collect statements from all TopLevelCodeDecl nodes and build a new
++  // top-level item list that excludes them.  TLCDs exist because the parser
++  // wraps executable statements in them when allowsTopLevelCode() is true;
++  // after type-checking we move those bodies into a single named function so
++  // the JIT has a normal FuncDecl it can look up and invoke.
++  SmallVector<ASTNode, 8> stmts;
++  SmallVector<ASTNode, 16> newItems;
++
++  for (auto &item : SF.getTopLevelItems()) {
++    auto *D = item.dyn_cast<Decl *>();
++    if (D) {
++      if (auto *TLCD = dyn_cast<TopLevelCodeDecl>(D)) {
++        for (auto &elem : TLCD->getBody()->getElements())
++          stmts.push_back(elem);
++        // Drop this TLCD — its body is being moved into the wrapper below.
++        continue;
++      }
++    }
++    newItems.push_back(item);
++  }
++
++  // Build the wrapper function: func <funcName>() -> Void
++  auto *params = ParameterList::createEmpty(Ctx);
++  DeclName name(Ctx, Ctx.getIdentifier(funcName), params);
++  auto *func = FuncDecl::createImplicit(
++      Ctx, StaticSpellingKind::None, name, /*NameLoc=*/SourceLoc(),
++      /*Async=*/false, /*Throws=*/false, /*ThrownType=*/Type(),
++      /*GenericParams=*/nullptr, params,
++      /*FnRetType=*/Ctx.TheEmptyTupleType, &SF);
++
++  // createImplicit only calls setResultInterfaceType; explicitly set the full
++  // interface type so SILGen can lower this function without a type-check pass.
++  // The type is trivially () -> Void — no inference needed.
++  // Must pass an explicit ExtInfo; the no-argument overload produces the
++  // @_NO_EXTINFO sentinel (hasExtInfo()==false) which causes the mangler to
++  // assert when it calls getExtInfo().  A default-constructed ExtInfoBuilder
++  // gives @convention(swift), non-async, non-throwing — correct for a plain
++  // module-level wrapper function.
++  func->setInterfaceType(FunctionType::get(
++      {}, {}, Ctx.TheEmptyTupleType, AnyFunctionType::ExtInfoBuilder().build()));
++
++  // This is a synthesized REPL wrapper, but it is a first-class callable that
++  // the JIT will look up by name — not an invisible compiler-internal node.
++  func->setImplicit(false);
++
++  // Move the collected statements (already type-checked) into the body.
++  auto *body = BraceStmt::create(Ctx, SourceLoc(), stmts, SourceLoc(),
++                                  /*implicit=*/true);
++  func->setBody(body, AbstractFunctionDecl::BodyKind::TypeChecked);
++
++  // Make the function public so the JIT can look it up by name.
++  //
++  // Two separate steps are required:
++  // 1. setAccess() writes AccessLevel into the TypeAndAccess bitfield.
++  //    SILDeclRef::getDefinitionLinkage() reads getEffectiveAccess() through
++  //    this bitfield → SILLinkage::Public.  This is what matters for JIT.
++  // 2. Adding an AccessControlAttr to getAttrs() is needed for the SIL module
++  //    printer (PrintOptions::printSIL() has PrintAccess=false, so it only
++  //    prints access if an explicit attr is present).  Without this the
++  //    declarations header shows "func __repl_N()" instead of
++  //    "public func __repl_N()" — purely cosmetic, but confusing.
++  func->setAccess(AccessLevel::Public);
++  func->getAttrs().add(new (Ctx) AccessControlAttr(
++      SourceLoc(), SourceRange(), AccessLevel::Public, /*implicit=*/true));
++
++  // Replace the source file's item list (TLCDs dropped, FuncDecl appended).
++  newItems.push_back(func);
++  SF.replaceTopLevelItems(newItems);
++
++  // Invariant: no TopLevelCodeDecl nodes remain after this transform.
++  assert(llvm::none_of(SF.getTopLevelDecls(),
++                       [](Decl *D) { return isa<TopLevelCodeDecl>(D); }) &&
++         "wrapTopLevelCodeInFunction: all TopLevelCodeDecl nodes must be gone");
++
++  return func;
++}
++
++void swift::makeDeclarationsPublic(SourceFile &SF) {
++  class Publicist : public ASTWalker {
++    /// Returns false for declarations whose access level must NOT be raised.
++    ///
++    /// Property-wrapper backing storage inside a struct gets a compiler-
++    /// synthesised memberwise initialiser whose parameter labels and types
++    /// are derived from the stored property access levels.  Overwriting those
++    /// access levels after synthesis breaks the initialiser, so we skip:
++    ///   - vars that have an attached property wrapper
++    ///   - vars that are the backing storage of a wrapped property
++    ///   - accessors whose storage falls into either category above
++    static bool canMakePublic(Decl *D) {
++      if (llvm::isa<StructDecl>(D->getDeclContext())) {
++        if (auto *var = llvm::dyn_cast<VarDecl>(D)) {
++          if (var->hasAttachedPropertyWrapper() ||
++              var->getOriginalWrappedProperty())
++            return false;
++          return true;
++        }
++        if (auto *accessor = llvm::dyn_cast<AccessorDecl>(D))
++          return canMakePublic(accessor->getStorage());
++      }
++      return true;
++    }
++
++    PreWalkAction walkToDeclPre(Decl *D) override {
++      if (!canMakePublic(D))
++        return Action::Continue();
++
++      if (auto *VD = llvm::dyn_cast<ValueDecl>(D)) {
++        // Default: public access so the JIT and later REPL cells can see it.
++        auto access = AccessLevel::Public;
++
++        // Non-final classes and syntactically overridable members (methods,
++        // properties, subscripts) should be 'open' so that later cells can
++        // subclass or override them — 'public' would block that.
++        if (llvm::isa<ClassDecl>(VD) || VD->isSyntacticallyOverridable()) {
++          if (!VD->isFinal())
++            access = AccessLevel::Open;
++        }
++
++        VD->overwriteAccess(access);
++        // Raise setter access in lockstep for stored/computed properties and
++        // subscripts so that 'var' declarations remain mutable from other cells.
++        if (auto *ASD = llvm::dyn_cast<AbstractStorageDecl>(D))
++          ASD->overwriteSetterAccess(access);
++      }
++      return Action::Continue();
++    }
++  };
++
++  Publicist p;
++  SF.walk(p);
++}
++
++bool swift::hasSingleNonVoidBareExpr(FuncDecl *WrapperFunc) {
++  auto *Body = WrapperFunc->getBody();
++  if (!Body || Body->getNumElements() != 1)
++    return false;
++  auto *E = Body->getElements()[0].dyn_cast<Expr *>();
++  if (!E)
++    return false;
++  auto Ty = E->getType();
++  return Ty && !Ty->hasError() && !Ty->isVoid();
++}
+diff --git a/lib/Immediate/REPLTransforms.h b/lib/Immediate/REPLTransforms.h
+new file mode 100644
+index 0000000..a7289a3
+--- /dev/null
++++ b/lib/Immediate/REPLTransforms.h
+@@ -0,0 +1,66 @@
++//===--- REPLTransforms.h - AST transforms for the Swift REPL -------------===//
++//
++// This source file is part of the Swift.org open source project
++//
++// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
++// Licensed under Apache License v2.0 with Runtime Library Exception
++//
++// See https://swift.org/LICENSE.txt for license information
++// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
++//
++//===----------------------------------------------------------------------===//
++///
++/// \file
++/// Post-type-check AST transforms applied to each REPL input before SIL
++/// lowering.
++///
++//===----------------------------------------------------------------------===//
++
++#ifndef SWIFT_IMMEDIATE_REPLTRANSFORMS_H
++#define SWIFT_IMMEDIATE_REPLTRANSFORMS_H
++
++#include "swift/Basic/LLVM.h"
++
++namespace swift {
++class FuncDecl;
++class SourceFile;
++
++/// Wraps all TopLevelCodeDecl bodies found in \p SF into a single synthesized
++/// \c () -> Void function named \p funcName, removing those TopLevelCodeDecl
++/// nodes from \p SF.  If no TopLevelCodeDecl nodes are present (pure
++/// declaration input), an empty stub function is still added so the JIT always
++/// has a well-known entry point to invoke.
++///
++/// Must be called after type-checking and before SIL lowering.
++///
++/// Returns a pointer to the synthesized FuncDecl so callers can compute its
++/// linker-level symbol via SILDeclRef(result).mangle().
++FuncDecl *wrapTopLevelCodeInFunction(SourceFile &SF, StringRef funcName);
++
++/// Walks all declarations in \p SF and promotes their access level to
++/// \c public (or \c open for non-final classes and syntactically overridable
++/// members).  This is required before SIL lowering so that the JIT can
++/// resolve every declaration emitted by previous REPL cells.
++///
++/// Property-wrapper backing variables inside structs are intentionally left
++/// alone because changing their access would break the implicit memberwise
++/// initialiser that the compiler synthesises for them.
++///
++/// Must be called after wrapTopLevelCodeInFunction() and before SIL lowering.
++void makeDeclarationsPublic(SourceFile &SF);
++
++/// Returns true if \p WrapperFunc's body contains exactly one expression
++/// whose post-typecheck type is non-Void and error-free.
++///
++/// This is the cheapest possible test for "was this REPL input a bare
++/// value-producing expression?": after wrapTopLevelCodeInFunction() has run,
++/// declarations produce an empty wrapper body, void-returning calls produce a
++/// ()-typed expression, and bare value expressions (e.g. \c 1+1, \c x)
++/// produce a single non-Void Expr*.
++///
++/// Must be called after type-checking and wrapTopLevelCodeInFunction().
++bool hasSingleNonVoidBareExpr(FuncDecl *WrapperFunc);
++
++} // end namespace swift
++
++#endif // SWIFT_IMMEDIATE_REPLTRANSFORMS_H
+diff --git a/lib/Immediate/SwiftMaterializationUnit.cpp b/lib/Immediate/SwiftMaterializationUnit.cpp
+index 53b28d0..0f23fca 100644
+--- a/lib/Immediate/SwiftMaterializationUnit.cpp
++++ b/lib/Immediate/SwiftMaterializationUnit.cpp
+@@ -149,6 +149,15 @@ llvm::orc::ObjectTransformLayer &SwiftJIT::getObjTransformLayer() {
+   return J->getObjTransformLayer();
+ }
+ 
++llvm::Error SwiftJIT::addIRModule(llvm::orc::ThreadSafeModule TSM) {
++  return J->addIRModule(J->getMainJITDylib(), std::move(TSM));
++}
++
++llvm::Expected<llvm::orc::ExecutorAddr>
++SwiftJIT::lookup(llvm::StringRef Name) {
++  return J->lookup(Name);
++}
++
+ llvm::Expected<std::unique_ptr<llvm::orc::LLJIT>>
+ SwiftJIT::CreateLLJIT(CompilerInstance &CI) {
+   llvm::TargetOptions TargetOpt;
+diff --git a/lib/Immediate/WasmExecutor.cpp b/lib/Immediate/WasmExecutor.cpp
+new file mode 100644
+index 0000000..d4f63f5
+--- /dev/null
++++ b/lib/Immediate/WasmExecutor.cpp
+@@ -0,0 +1,71 @@
++//===--- WasmExecutor.cpp - Wasm cell executor --------------------------===//
++//
++// This source file is part of the Swift.org open source project
++//
++// Copyright (c) 2026 the Swift project authors
++// Licensed under Apache License v2.0 with Runtime Library Exception
++//
++// See https://swift.org/LICENSE.txt for license information
++// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
++//
++//===----------------------------------------------------------------------===//
++
++#include "WasmExecutor.h"
++#include "swift/Runtime/Config.h"
++#include "lld/Common/Driver.h"
++#include "llvm/IR/LegacyPassManager.h"
++#include "llvm/IR/Module.h"
++#include "llvm/MC/TargetRegistry.h"
++#include "llvm/Support/FileSystem.h"
++#include "llvm/Support/Path.h"
++#include "llvm/Target/TargetMachine.h"
++#include <dlfcn.h>
++LLD_HAS_DRIVER(wasm)
++using namespace swift;
++llvm::Expected<std::unique_ptr<SwiftWasmExecutor>> SwiftWasmExecutor::Create(llvm::StringRef runtimeResourcePath) {
++  auto executor = std::make_unique<SwiftWasmExecutor>();
++  if (auto error = llvm::sys::fs::createUniqueDirectory("swift-repl-", executor->TempDir))
++    return llvm::errorCodeToError(error);
++  executor->TLSObject = runtimeResourcePath;
++  llvm::sys::path::append(executor->TLSObject, "emscripten", "wasm32", "crtbegin-mt.o");
++  return std::move(executor);
++}
++llvm::Error SwiftWasmExecutor::executeModule(llvm::Module *module, llvm::StringRef entry) {
++  std::string error;
++  auto *target = llvm::TargetRegistry::lookupTarget(module->getTargetTriple(), error);
++  if (!target) return llvm::make_error<llvm::StringError>(error, llvm::inconvertibleErrorCode());
++  llvm::TargetOptions options;
++  std::unique_ptr<llvm::TargetMachine> machine(target->createTargetMachine(
++      module->getTargetTriple(), "generic", "+atomics,+bulk-memory,+exception-handling,+tail-call",
++      options, llvm::Reloc::Model::PIC_));
++  module->setDataLayout(machine->createDataLayout());
++  if (auto *libraries = module->getNamedMetadata("llvm.dependent-libraries"))
++    libraries->eraseFromParent();
++  llvm::SmallString<256> object(TempDir), binary(TempDir);
++  llvm::sys::path::append(object, llvm::Twine(ModuleIndex) + ".o");
++  llvm::sys::path::append(binary, llvm::Twine(ModuleIndex++) + ".wasm");
++  std::error_code ec;
++  llvm::raw_fd_ostream stream(object, ec);
++  if (ec) return llvm::errorCodeToError(ec);
++  llvm::legacy::PassManager passes;
++  if (machine->addPassesToEmitFile(passes, stream, nullptr, llvm::CodeGenFileType::ObjectFile))
++    return llvm::make_error<llvm::StringError>("Cannot emit a Wasm cell", llvm::inconvertibleErrorCode());
++  passes.run(*module);
++  stream.close();
++  const char *arguments[] = {"wasm-ld", "--threads=1", "-shared", "-Bsymbolic", "--experimental-pic", "--import-memory",
++      "--shared-memory", "--allow-undefined", "--export-dynamic",
++      "--export=__wasm_call_ctors", "--export=_emscripten_tls_init",
++      TLSObject.c_str(), object.c_str(), "-o", binary.c_str()};
++  auto result = lld::lldMain(arguments, llvm::outs(), llvm::errs(), {{lld::Wasm, &lld::wasm::link}});
++  if (result.retCode || !result.canRunAgain)
++    return llvm::make_error<llvm::StringError>("Could not link the Wasm cell", llvm::inconvertibleErrorCode());
++  auto *handle = dlopen(binary.c_str(), RTLD_NOW | RTLD_GLOBAL);
++  if (!handle) return llvm::make_error<llvm::StringError>(dlerror(), llvm::inconvertibleErrorCode());
++  auto *symbol = dlsym(handle, entry.str().c_str());
++  if (!symbol) return llvm::make_error<llvm::StringError>(dlerror(), llvm::inconvertibleErrorCode());
++  // Match Swift's calling convention, including its implicit context/error parameters.
++  using Entry = void SWIFT_CC(swift)();
++  reinterpret_cast<Entry *>(symbol)();
++  // Loaded cells retain metadata and globals referenced by subsequent cells.
++  return llvm::Error::success();
++}
+diff --git a/lib/Immediate/WasmExecutor.h b/lib/Immediate/WasmExecutor.h
+new file mode 100644
+index 0000000..0732059
+--- /dev/null
++++ b/lib/Immediate/WasmExecutor.h
+@@ -0,0 +1,29 @@
++//===--- WasmExecutor.h - Wasm cell executor interface --------------------------===//
++//
++// This source file is part of the Swift.org open source project
++//
++// Copyright (c) 2026 the Swift project authors
++// Licensed under Apache License v2.0 with Runtime Library Exception
++//
++// See https://swift.org/LICENSE.txt for license information
++// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
++//
++//===----------------------------------------------------------------------===//
++
++#ifndef SWIFT_IMMEDIATE_WASMEXECUTOR_H
++#define SWIFT_IMMEDIATE_WASMEXECUTOR_H
++#include "llvm/ADT/SmallString.h"
++#include "llvm/Support/Error.h"
++#include <memory>
++namespace llvm { class Module; }
++namespace swift {
++class SwiftWasmExecutor {
++  llvm::SmallString<256> TempDir;
++  unsigned ModuleIndex = 0;
++  llvm::SmallString<256> TLSObject;
++public:
++  static llvm::Expected<std::unique_ptr<SwiftWasmExecutor>> Create(llvm::StringRef runtimeResourcePath);
++  llvm::Error executeModule(llvm::Module *module, llvm::StringRef entry);
++};
++}
++#endif
+diff --git a/lib/Parse/ParseDecl.cpp b/lib/Parse/ParseDecl.cpp
+index 4a9ef9e..32fedf2 100644
+--- a/lib/Parse/ParseDecl.cpp
++++ b/lib/Parse/ParseDecl.cpp
+@@ -191,6 +191,7 @@ void Parser::parseTopLevelItems(SmallVectorImpl<ASTNode> &items) {
+     BraceItemListKind braceItemListKind;
+     switch (SF.Kind) {
+     case SourceFileKind::Main:
++    case SourceFileKind::REPL:
+       braceItemListKind = BraceItemListKind::TopLevelCode;
+       break;
+ 
+@@ -9346,13 +9347,15 @@ Parser::parseDeclVar(ParseDeclOptions Flags,
+                  Attributes.hasAttribute<ConstValAttr>() ||
+                  Attributes.hasAttribute<ExternAttr>();
+ 
+-  // If this is a var in the top-level of script/repl source file, wrap the
+-  // PatternBindingDecl in a TopLevelCodeDecl, since it represents executable
+-  // code.  The VarDecl and any accessor decls (for computed properties) go in
+-  // CurDeclContext.  @const/@section globals are not top-level, per SE-0492.
+-  // We follow the same rule for @_extern.
++  // If this is a var in the top-level of a script (Main) source file, wrap the
++  // PatternBindingDecl in a TopLevelCodeDecl so the initializer runs as part
++  // of the sequential @main execution.  REPL files use library-style semantics
++  // (isScriptMode()==false) so PatternBindingDecls are bare module-level
++  // globals there, matching '-parse-as-library' behavior.  VarDecls and
++  // accessor decls go in CurDeclContext in both cases.
++  // @const/@section globals are not top-level, per SE-0492; same for @_extern.
+   TopLevelCodeDecl *topLevelDecl = nullptr;
+-  if (allowTopLevelCode() && CurDeclContext->isModuleScopeContext() &&
++  if (SF.isScriptMode() && CurDeclContext->isModuleScopeContext() &&
+       !IsConst) {
+     // The body of topLevelDecl will get set later.
+     topLevelDecl = new (Context) TopLevelCodeDecl(CurDeclContext);
+@@ -10848,6 +10851,7 @@ parseDeclDeinit(ParseDeclOptions Flags, DeclAttributes &Attributes) {
+     case SourceFileKind::MacroExpansion:
+     case SourceFileKind::DefaultArgument:
+     case SourceFileKind::SyntheticMacro:
++    case SourceFileKind::REPL:
+       if (Tok.is(tok::identifier)) {
+         diagnose(Tok, diag::destructor_has_name).fixItRemove(Tok.getLoc());
+         consumeToken();
+diff --git a/lib/Parse/ParseRequests.cpp b/lib/Parse/ParseRequests.cpp
+index a264500..4cd60a5 100644
+--- a/lib/Parse/ParseRequests.cpp
++++ b/lib/Parse/ParseRequests.cpp
+@@ -313,6 +313,7 @@ bool shouldParseViaASTGen(SourceFile &SF) {
+     case SourceFileKind::MacroExpansion:
+     case SourceFileKind::DefaultArgument:
+     case SourceFileKind::SyntheticMacro:
++    case SourceFileKind::REPL:
+       break;
+   }
+ 
+diff --git a/lib/Parse/Parser.cpp b/lib/Parse/Parser.cpp
+index 03a8dd7..6903ff9 100644
+--- a/lib/Parse/Parser.cpp
++++ b/lib/Parse/Parser.cpp
+@@ -327,6 +327,7 @@ static LexerMode sourceFileKindToLexerMode(SourceFileKind kind) {
+     case swift::SourceFileKind::MacroExpansion:
+     case swift::SourceFileKind::DefaultArgument:
+     case swift::SourceFileKind::SyntheticMacro:
++    case swift::SourceFileKind::REPL:
+       return LexerMode::Swift;
+   }
+   llvm_unreachable("covered switch");
+@@ -514,7 +515,7 @@ bool Parser::shouldEvaluatePoundIfDecls() const {
+ }
+ 
+ bool Parser::allowTopLevelCode() const {
+-  return SF.isScriptMode();
++  return SF.allowsTopLevelCode();
+ }
+ 
+ bool Parser::isInMacroExpansion(SourceLoc loc) const {
+diff --git a/lib/Sema/CodeSynthesisDistributedActor.cpp b/lib/Sema/CodeSynthesisDistributedActor.cpp
+index 39db581..857e5c2 100644
+--- a/lib/Sema/CodeSynthesisDistributedActor.cpp
++++ b/lib/Sema/CodeSynthesisDistributedActor.cpp
+@@ -1020,6 +1020,7 @@ addDistributedActorCodableConformance(
+         case SourceFileKind::SIL:
+         case SourceFileKind::DefaultArgument:
+         case SourceFileKind::SyntheticMacro:
++        case SourceFileKind::REPL:
+           break;
+         }
+       }
+diff --git a/lib/Sema/MiscDiagnostics.cpp b/lib/Sema/MiscDiagnostics.cpp
+index d0b0171..a525ab6 100644
+--- a/lib/Sema/MiscDiagnostics.cpp
++++ b/lib/Sema/MiscDiagnostics.cpp
+@@ -6373,7 +6373,8 @@ static void diagnoseExplicitUseOfLazyVariableStorage(const Expr *E,
+         return;
+       }
+       if (sourceFileKind->Kind != SourceFileKind::Library &&
+-          sourceFileKind->Kind != SourceFileKind::Main) {
++          sourceFileKind->Kind != SourceFileKind::Main &&
++          sourceFileKind->Kind != SourceFileKind::REPL) {
+         return;
+       }
+       if (VD->isLazyStorageProperty()) {
+diff --git a/lib/Sema/TypeCheckBitwise.cpp b/lib/Sema/TypeCheckBitwise.cpp
+index f4b1536..993c942 100644
+--- a/lib/Sema/TypeCheckBitwise.cpp
++++ b/lib/Sema/TypeCheckBitwise.cpp
+@@ -349,6 +349,7 @@ bool DeriveImplicitBitwiseCopyableConformance::allowedForFile() {
+     case SourceFileKind::Main:
+     case SourceFileKind::SIL:
+     case SourceFileKind::SyntheticMacro:
++    case SourceFileKind::REPL:
+       return true;
+     }
+     llvm_unreachable("covered switch");
+diff --git a/lib/Sema/TypeCheckConcurrency.cpp b/lib/Sema/TypeCheckConcurrency.cpp
+index 4575c35..1e8c344 100644
+--- a/lib/Sema/TypeCheckConcurrency.cpp
++++ b/lib/Sema/TypeCheckConcurrency.cpp
+@@ -77,6 +77,7 @@ static bool shouldInferAttributeInContext(const DeclContext *dc) {
+         case SourceFileKind::Main:
+         case SourceFileKind::SIL:
+         case SourceFileKind::SyntheticMacro:
++        case SourceFileKind::REPL:
+           return true;
+         }
+       }
+@@ -935,6 +936,7 @@ static bool shouldDiagnosePreconcurrencyImports(SourceFile &sf) {
+   case SourceFileKind::Main:
+   case SourceFileKind::MacroExpansion:
+   case SourceFileKind::SyntheticMacro:
++  case SourceFileKind::REPL:
+       return true;
+   }
+ }
+@@ -7956,6 +7958,7 @@ ProtocolConformance *swift::deriveImplicitSendableConformance(
+         case SourceFileKind::Main:
+         case SourceFileKind::SIL:
+         case SourceFileKind::SyntheticMacro:
++        case SourceFileKind::REPL:
+           break;
+         }
+       }
+diff --git a/lib/Sema/TypeCheckDeclPrimary.cpp b/lib/Sema/TypeCheckDeclPrimary.cpp
+index 292985c..832b901 100644
+--- a/lib/Sema/TypeCheckDeclPrimary.cpp
++++ b/lib/Sema/TypeCheckDeclPrimary.cpp
+@@ -1749,6 +1749,7 @@ static void maybeDiagnoseClassWithoutInitializers(ClassDecl *classDecl) {
+     case SourceFileKind::Main:
+     case SourceFileKind::MacroExpansion:
+     case SourceFileKind::SyntheticMacro:
++    case SourceFileKind::REPL:
+       break;
+     }
+   }
+@@ -2814,6 +2815,7 @@ public:
+           case SourceFileKind::Library:
+           case SourceFileKind::MacroExpansion:
+           case SourceFileKind::SyntheticMacro:
++          case SourceFileKind::REPL:
+             var->diagnose(diag::opaque_type_var_no_init);
+             break;
+           }
+@@ -2840,6 +2842,7 @@ public:
+           case SourceFileKind::Library:
+           case SourceFileKind::MacroExpansion:
+           case SourceFileKind::SyntheticMacro:
++          case SourceFileKind::REPL:
+             break;
+           }
+ 
+@@ -2858,6 +2861,7 @@ public:
+           case SourceFileKind::Main:
+           case SourceFileKind::Interface:
+           case SourceFileKind::SIL:
++          case SourceFileKind::REPL:
+             return;
+           case SourceFileKind::DefaultArgument:
+           case SourceFileKind::Library:
+diff --git a/lib/Sema/TypeCheckStmt.cpp b/lib/Sema/TypeCheckStmt.cpp
+index 40921b6..eb9966c 100644
+--- a/lib/Sema/TypeCheckStmt.cpp
++++ b/lib/Sema/TypeCheckStmt.cpp
+@@ -2476,8 +2476,10 @@ void StmtChecker::typeCheckASTNode(ASTNode &node) {
+     auto &ctx = DC->getASTContext();
+ 
+     TypeCheckExprOptions options = TypeCheckExprFlags::IsExprStmt;
++    auto *SF = DC->getParentSourceFile();
+     bool isDiscarded =
+-        (!ctx.LangOpts.Playground && !ctx.LangOpts.DebuggerSupport);
++        (!ctx.LangOpts.Playground && !ctx.LangOpts.DebuggerSupport &&
++         !(SF && SF->Kind == SourceFileKind::REPL));
+     if (isDiscarded)
+       options |= TypeCheckExprFlags::IsDiscarded;
+ 
+@@ -3289,6 +3291,7 @@ static bool requiresDefinition(Decl *decl) {
+     case SourceFileKind::MacroExpansion:
+     case SourceFileKind::DefaultArgument:
+     case SourceFileKind::SyntheticMacro:
++    case SourceFileKind::REPL:
+       break;
+     }
+   }
+diff --git a/lib/Sema/TypeChecker.cpp b/lib/Sema/TypeChecker.cpp
+index dc9dc66..798fe83 100644
+--- a/lib/Sema/TypeChecker.cpp
++++ b/lib/Sema/TypeChecker.cpp
+@@ -404,6 +404,7 @@ void swift::performWholeModuleTypeChecking(SourceFile &SF) {
+   case SourceFileKind::Main:
+   case SourceFileKind::MacroExpansion:
+   case SourceFileKind::SyntheticMacro:
++  case SourceFileKind::REPL:
+     diagnoseObjCMethodConflicts(SF);
+     diagnoseObjCCategoryConflicts(SF);
+     diagnoseObjCUnsatisfiedOptReqConflicts(SF);
+@@ -431,7 +432,8 @@ void swift::loadDerivativeConfigurations(SourceFile &SF) {
+   case SourceFileKind::Library:
+   case SourceFileKind::MacroExpansion:
+   case SourceFileKind::Main:
+-  case SourceFileKind::SyntheticMacro: {
++  case SourceFileKind::SyntheticMacro:
++  case SourceFileKind::REPL: {
+     CustomDerivativesRequest request(&SF);
+     evaluateOrDefault(SF.getASTContext().evaluator, request, {});
+     return;

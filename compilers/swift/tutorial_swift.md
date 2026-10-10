@@ -82,7 +82,29 @@ Click generated files in Explorer to inspect them. Select a `.wasm` file and
 prints the underlying jobs. The upstream C++ driver parses advanced arguments,
 including `-Xfrontend`, `-Xcc`, `-Xlinker`, multiple inputs and response files.
 Raw `swift-frontend` and `wasm-ld` are also available. Commands are argv parsing,
-not a shell; `swift file.swift`, the REPL and SwiftPM are not implemented here.
+not a shell; `swift file.swift` and SwiftPM are not implemented here.
+
+## REPL
+
+Enter `swift` in the advanced terminal, then submit one line at a time:
+
+```swift
+var counter = 1
+counter += 1
+print(counter)
+print("Hello, 🌐!")
+func fib(_ n: Int) -> Int {
+  if n < 2 { return n }
+  return fib(n - 1) + fib(n - 2)
+}
+print(fib(10))
+```
+
+The prompt changes to `…>` for unfinished input. Definitions persist across
+cells; `print(counter)` prints `2`, and `print(fib(10))` prints `55`.
+`:reset` clears the session; `:quit` returns to tool commands.
+**Ctrl+C** in the terminal interrupts a running cell and clears the session.
+The REPL module downloads on first use and stays cached for the page.
 
 JavaScriptKit, Foundation, concurrency and macros are not included in this SDK.
 See [README.md](README.md) for reproduction and [summary.md](summary.md) for

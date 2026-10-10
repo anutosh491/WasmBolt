@@ -10,13 +10,16 @@ const root = resolve(import.meta.dirname, '../../..');
 const source = resolve(process.argv[2] || join(root, 'site'));
 const destination = resolve(process.argv[3] || join(root, 'compilers/swift/.work/pages'));
 // The generic packager cannot accept oversized single files. Feed it a small
-// mirror excluding our two large binaries, without touching the source site.
+// mirror excluding large binaries, without touching the source site.
 const mirror = join(root, 'compilers/swift/.work/pages-input');
+const binaries = ['compilers/swift/wasmbolt-swift.wasm', 'debugger/lldb/lldb-dap.wasm'];
+const repl = 'compilers/swift/wasmbolt-swift-repl.wasm';
+if (await stat(join(source, repl)).catch(() => null)) binaries.push(repl);
+await rm(mirror, { recursive: true, force: true });
 const { cp } = await import('node:fs/promises');
 await mkdir(mirror, { recursive: true });
 await cp(source, mirror, { recursive: true, filter: path =>
-  !path.endsWith('/compilers/swift/wasmbolt-swift.wasm') &&
-  !path.endsWith('/debugger/lldb/lldb-dap.wasm') });
+  !binaries.some(binary => path.endsWith('/' + binary)) });
 const result = spawnSync(process.execPath,
   [join(root, 'debugger/lldb/scripts/80-stage-pages.mjs'), mirror, destination],
   { stdio: 'inherit' });
@@ -27,7 +30,7 @@ if ((await stat(join(source, sdk))).size > 25 * 1024 * 1024)
   throw new Error('Swift SDK exceeds Pages file limit');
 await copyFile(join(source, sdk), join(destination, sdk));
 headers += `\n/${sdk}\n  Content-Type: application/octet-stream\n  Cache-Control: no-transform\n`;
-for (const path of ['compilers/swift/wasmbolt-swift.wasm', 'debugger/lldb/lldb-dap.wasm']) {
+for (const path of binaries) {
   const size = (await stat(join(source, path))).size, parts = [];
   for (let offset = 0, index = 0; offset < size; offset += 64 * 1024 * 1024, index++) {
     const name = `${path}.part${index}`, output = join(destination, name);

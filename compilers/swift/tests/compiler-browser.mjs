@@ -10,6 +10,8 @@ const work = resolve(
   process.env.WASMBOLT_SWIFT_WORK_DIR ?? resolve(project, '.work')
 );
 const debuggerTest = process.argv[2] === 'debug';
+const replTest = process.argv[2] === 'repl';
+let replDownloads = 0;
 const server = createServer(async (request, response) => {
   for (const [name, value] of Object.entries({
     'Cross-Origin-Opener-Policy': 'same-origin',
@@ -45,7 +47,13 @@ const server = createServer(async (request, response) => {
     response.end('<!doctype html><title>Swift compiler browser test</title>');
     return;
   }
+  if (url.pathname === '/compilers/swift/wasmbolt-swift-repl.wasm')
+    ++replDownloads;
   const routes = [
+    ['/compilers/swift/wasmbolt-swift-repl.', resolve(work, 'repl/output'), 'wasmbolt-swift-repl.'],
+    ['/compilers/swift/runtime.tar.gz', resolve(work, 'swift-package'), 'runtime.tar.gz'],
+    ['/compilers/swift/', project],
+    ['/runtime/', resolve(project, '../../runtime')],
     ['/artifacts/', resolve(work, 'output')],
     ['/browser-guests/', resolve(work, 'browser-tests')],
     ['/compiler/', resolve(work, 'compiler')],
@@ -53,10 +61,10 @@ const server = createServer(async (request, response) => {
     ['/support/', resolve(work, 'tests')],
     ['/', resolve(project, 'tests')]
   ];
-  const [prefix, root] = routes.find(([prefix]) =>
+  const [prefix, root, filename = ''] = routes.find(([prefix]) =>
     url.pathname.startsWith(prefix)
   );
-  const file = resolve(root, url.pathname.slice(prefix.length));
+  const file = resolve(root, filename + url.pathname.slice(prefix.length));
   if (!file.startsWith(root + sep)) {
     response.writeHead(403).end();
     return;
@@ -82,7 +90,10 @@ try {
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
   page.on('console', event => console.log(event.text()));
-  const result = await page.evaluate(
+  const result = replTest ? await page.evaluate(async () => {
+    const { checkRepl } = await import('/repl-cells.mjs');
+    return checkRepl();
+  }) : await page.evaluate(
     debuggerTest =>
       new Promise((resolve, reject) => {
         const worker = new Worker(
@@ -114,14 +125,17 @@ try {
   await writeFile(
     resolve(
       work,
-      debuggerTest
+      replTest ? 'repl-browser-result.json' : debuggerTest
         ? 'debugger-browser-result.json'
         : 'compiler-browser-result.json'
     ),
     JSON.stringify(result, null, 2) + '\n'
   );
   assert.equal(result.success, true, result.message);
-  if (debuggerTest) {
+  if (replTest) {
+    assert.equal(replDownloads, 1, 'Reset must reuse the downloaded REPL binary');
+    process.stdout.write('Browser Swift REPL cells, error recovery and reset passed.\n');
+  } else if (debuggerTest) {
     process.stdout.write('Browser Swift debugger passed.\n');
   } else {
     assert.equal(result.isolated, true);

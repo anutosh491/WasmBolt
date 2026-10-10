@@ -6,6 +6,7 @@ import { publicFunctionExports, displayFunctionExport, parseWasmFunctionSignatur
 import { runTool, isToolCommand, workspaceFiles } from "../tools/client.js";
 import { tokenize } from "../tools/registry.js";
 import { prepareSwift, runSwift } from "../compilers/swift/client.js";
+import { startSwiftRepl, evaluateSwiftRepl, stopSwiftRepl } from "../compilers/swift/repl.js";
 import { driver as swiftDriver, link as swiftLink } from "../compilers/swift/commands.js";
 import { runStandalone } from "../compilers/swift/runner.js";
 import { createWorkspace, swiftExampleNames, loadSwiftExamples } from "../compilers/swift/workspace.js";
@@ -972,6 +973,10 @@ function wireUi() {
     elements.command.value = "";
     setBusy(true, "Running command…");
     try {
+      if (swiftReplActive || /^swift(?:\s+(?:-repl|repl))?$/.test(command)) {
+        await runReplInput(command);
+        return;
+      }
       // Keep the virtual filesystem in sync with the visible editor so a raw
       // command works immediately after a fresh page load.
       writeSource();
@@ -996,6 +1001,16 @@ function wireUi() {
       terminal.scrollTop = terminal.scrollHeight;
     }
   });
+  elements.command.addEventListener("keydown", (event) => {
+    if (swiftReplActive && event.ctrlKey && event.key.toLowerCase() === "c") {
+      event.preventDefault();
+      swiftReplActive = false;
+      stopSwiftRepl();
+      appendLog('Swift REPL interrupted. Enter swift to start again.');
+      $(".command-line > span").textContent = 'wasmbolt %';
+      setStatus('Compiler ready');
+    }
+  });
   window.addEventListener("keydown", (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
       event.preventDefault();
@@ -1006,6 +1021,38 @@ function wireUi() {
   configureResizers();
   updateSignatureInputs(0);
   updateLanguageUi();
+}
+
+let swiftReplActive = false;
+async function runReplInput(source) {
+  appendLog(`${swiftReplActive ? 'swift>' : '$'} ${source}`);
+  if (!swiftReplActive && !$('meta[name="wasmbolt-swift-repl"]'))
+    throw new Error('Swift REPL is not installed in this build.');
+  let result;
+  try {
+    if (swiftReplActive && /^:(?:quit|exit|q)$/.test(source)) {
+      stopSwiftRepl(); swiftReplActive = false;
+    } else if (!swiftReplActive || source === ':reset') {
+      if (source === ':reset') stopSwiftRepl();
+      result = await startSwiftRepl();
+      swiftReplActive = true;
+    } else {
+      result = await evaluateSwiftRepl(source);
+    }
+    for (const line of result?.stdout || []) appendLog(line);
+    for (const line of result?.stderr || []) appendLog(line, 'err');
+    if (result?.code === 2) {
+      stopSwiftRepl(); swiftReplActive = false;
+      appendLog('Swift REPL stopped after an execution failure.', 'err');
+    }
+  } catch (error) {
+    stopSwiftRepl(); swiftReplActive = false;
+    if (error.message === 'Swift REPL stopped') return;
+    throw error;
+  } finally {
+    $(".command-line > span").textContent = swiftReplActive ? (result?.incomplete ? '…>' : 'swift>') : 'wasmbolt %';
+  }
+  setStatus(swiftReplActive ? 'Swift REPL ready' : 'Compiler ready');
 }
 
 async function loadCompiler(workspaceReady) {

@@ -1,4 +1,4 @@
-# Swift browser compiler and matching debugger
+# Swift browser compiler, debugger and REPL
 
 This recipe builds Swift's C++ driver, frontend and Wasm LLD into one static
 Emscripten module. `swift` and `swiftc` use upstream argument parsing and job
@@ -6,8 +6,8 @@ scheduling, with an in-process browser executor. SDK defaults supply paths and
 runtime libraries. Raw `swift-frontend` and `wasm-ld` remain available.
 
 The compiler and Swift-enabled LLDB use pthreads. Programs use a separate,
-normal single-threaded static Swift standard library for WAMR. This is normal
-Swift, not Embedded Swift or the ORC REPL.
+normal single-threaded static Swift standard library for WAMR. The optional REPL
+uses a separate threaded host and loads Wasm cells in process.
 
 See [summary.md](summary.md) for source fixes and
 [tutorial_swift.md](tutorial_swift.md) for outputs, execution and debugging.
@@ -77,6 +77,15 @@ archive. It rebuilds LLDB against Swift's LLVM fork rather than using the
 LLVM-main LLDB archive. Override `WASMBOLT_DEBUGGER_SOURCE_DIR` or
 `WASMBOLT_WAMR_INPUT_DIR` to reuse compatible inputs elsewhere.
 
+For the REPL, reuse the compiler builds above:
+
+```sh
+bash scripts/60-build-repl.sh
+```
+
+This builds immediate mode separately under `.work/repl/`; its output is
+`output/wasmbolt-swift-repl.{js,wasm}`. Staging includes it when present.
+
 `WASMBOLT_SWIFT_WORK_DIR` defaults to `.work`. `WASMBOLT_SWIFT_SOURCE_ROOT`
 selects the directory containing Swift, cmark and StringProcessing; default
 `.work/sources`. `WASMBOLT_SWIFT_LLVM_SOURCE` selects the matching LLVM source;
@@ -111,6 +120,7 @@ node tests/prepare.mjs
 node tests/compiler.mjs
 node tests/compiler-browser.mjs
 node tests/compiler-browser.mjs debug
+node tests/compiler-browser.mjs repl
 ```
 
 The independent scalar/array browser gate checks AST, SIL, IR, assembly, DWARF objects, static

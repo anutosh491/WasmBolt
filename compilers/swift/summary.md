@@ -5,8 +5,9 @@ This branch is based on structured WasmBolt main `372acf6` (2026-10-10), includi
 resident Clang outputs, cached analysis modules and the shared Debug target picker and optional clangd. It extends that UI directly;
 no workbench, Jupyter/Lumino application or old dependency tree is imported.
 
-Keep two reviewable layers: Swift compiler integration, followed by matching
-Swift LLDB/WAMR integration. The final checkout contains both reproductions.
+Keep three reviewable layers: Swift compiler integration, matching Swift
+LLDB/WAMR integration, then the persistent Wasm REPL. Each includes its own
+source patches, build steps and usage instructions.
 Builds remain uncommitted and are preserved separately from these source files.
 
 ## Source pins
@@ -190,6 +191,51 @@ the callee, selecting stack frames opens either source, and Step out returns
 to the caller. The checks inspect `next = 1`, `answer = 6765`, stdout and exit 0;
 single-file Swift source-build debugging still passes with the same cached tools.
 
+## Wasm REPL
+
+The REPL ports the interpreter from [Swift PR #1](https://github.com/anutosh491/swift/pull/1),
+head `6f48c1dd2f9268cb03598675a69eb3713311f5a2`, onto the pinned Swift revision.
+`swift-repl-browser.patch` contains the interpreter, REPL source-file handling,
+AST transformations and Wasm executor. Native execution retains ORC; Emscripten
+execution emits a PIC object per cell, invokes Wasm LLD in process, loads the
+side module with `dlopen(RTLD_GLOBAL)` and calls its wrapper. Earlier modules
+remain loaded so subsequent cells can reference their definitions and metadata.
+LLDB is independent; its Wasm process plugin does not provide a JIT.
+
+`60-build-repl.sh` reuses the compiler's LLVM, cmark and host Swift runtime,
+but builds Swift's immediate-mode libraries in an isolated source/build tree.
+The existing compiler and debugger modules remain usable. The REPL host uses
+`MAIN_MODULE=2`, pthreads and one copy of the static host Swift runtime. Cells
+import that runtime rather than linking another copy. Matching PIC
+`crtbegin-mt.o` supplies TLS initialization required by Emscripten's loader.
+`-Bsymbolic` binds definitions in a cell locally while leaving references to
+previous cells and the host as imports. No duplicate LLVM-option workaround is
+included.
+
+`lld-relative-data.patch` fixes locally bound location-relative data relocations
+in Swift's LLVM fork. Swift metadata and C++ relative vtables store distances
+between addresses. Both addresses move by the same load base, so their difference
+is already final; LLD previously tried to emit an unsupported runtime relocation.
+The separate upstream LLVM patch has wasm32/wasm64 regressions for local/hidden
+symbols, `-Bsymbolic`, PIE and nonzero addends, plus negative coverage for
+preemptible and absolute targets. This recipe records the same narrow fix.
+
+`repl.js` owns a separate Worker. Entering `swift` in the advanced terminal
+starts the session; multiline input accumulates until complete. `:reset` creates
+a fresh Worker while reusing the downloaded binary, and `:quit` returns to tool
+commands. Compile errors keep the session alive; execution failures stop it.
+Ctrl+C terminates the REPL Worker, including a cell stuck in a loop.
+The compiler/linker and debugger use their existing independent Workers.
+
+The production build passes the browser cell gate: persistent state, displayed
+expressions, multiline functions, Unicode output, arrays/map, structs, string
+interpolation, generics, classes, enums, compile-error recovery and reset.
+The product UI also passes multiline prompts, Ctrl+C during an infinite loop,
+quit/re-entry, compilation and Fibonacci debugger stepping after the REPL.
+Compiler, REPL and LLDB binaries each download once per page, including resets
+and interruption. Validation uses the production bridge without probe exports.
+Generated cells and all build/test reports remain under ignored `.work/`.
+
 ## Current repository boundary
 
 Refreshed onto latest structured `main` on 2026-10-10. `compilers/swift/` owns
@@ -200,3 +246,9 @@ runtime and guest SDK remain separate from the published 6-x main toolchain.
 No source pins were advanced during this structural refresh. The UI adapters extend the already-merged debugger panel. Cloudflare deployment
 is deferred until the local Swift-only preview has been reviewed; the existing
 LLDB demo is untouched.
+
+SourceKit-LSP is deferred to a separate editor-support change. The main branch's
+clangd integration remains available for C/C++. This Swift build disables
+SourceKit; a browser language service needs additional SourceKit/dispatch support,
+and the full Swift-written LSP also needs libraries such as Foundation and
+SwiftSyntax. Compiler, debugger and REPL do not depend on that future port.

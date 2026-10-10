@@ -53,6 +53,14 @@ for suffix in ['js', 'wasm']:
          site / 'compilers/swift' / f'wasmbolt-swift.{suffix}')
 copy(a.work / 'swift-package/runtime.tar.gz',
      site / 'compilers/swift/runtime.tar.gz')
+with_repl = (a.work / 'repl/output/wasmbolt-swift-repl.wasm').is_file()
+if with_repl:
+    for suffix in ['js', 'wasm']:
+        copy(a.work / 'repl/output' / f'wasmbolt-swift-repl.{suffix}',
+             site / 'compilers/swift' / f'wasmbolt-swift-repl.{suffix}')
+    html = (site / 'index.html').read_text()
+    html = html.replace('<head>', '<head>\n    <meta name="wasmbolt-swift-repl" content="enabled" />')
+    (site / 'index.html').write_text(html)
 if with_debugger:
     for name in ['lldb-dap.js', 'lldb-dap.wasm', 'lldb-dap.worker.js']:
         copy(a.work / 'output' / name, site / 'debugger/lldb' / name)
@@ -80,7 +88,9 @@ if a.swift_only:
     html = html.replace('MLIR, Clang, LLVM, LLD and generated code',
                         'Swift, LLVM, LLD, LLDB and generated code')
     (site / 'index.html').write_text(html)
-for path in ['compilers/swift/wasmbolt-swift.wasm', *(['debugger/lldb/lldb-dap.wasm'] if with_debugger else [])]:
+for path in ['compilers/swift/wasmbolt-swift.wasm',
+             *(['debugger/lldb/lldb-dap.wasm'] if with_debugger else []),
+             *(['compilers/swift/wasmbolt-swift-repl.wasm'] if with_repl else [])]:
     (site / (path + '.parts.json')).write_text(json.dumps([Path(path).name]) + '\n')
 (site / '_headers').write_text('/*\n  Cross-Origin-Opener-Policy: same-origin\n'
     '  Cross-Origin-Embedder-Policy: require-corp\n'
