@@ -1,0 +1,54 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>WasmBolt LLDB-DAP smoke</title>
+<pre id="log"></pre>
+<script type="module">
+  const output = document.querySelector('#log');
+  const lines = [];
+  const record = value => {
+    const text = typeof value === 'string' ? value : JSON.stringify(value);
+    lines.push(text);
+    output.textContent = `${lines.join('\n')}\n`;
+    console.log(text);
+  };
+
+  window.__wasmboltSmoke = { done: false, result: null, lines };
+  record({ crossOriginIsolated, sharedArrayBuffer: typeof SharedArrayBuffer });
+  if (!crossOriginIsolated || typeof SharedArrayBuffer !== 'function') {
+    const result = { ok: false, error: 'COOP/COEP isolation is unavailable.' };
+    window.__wasmboltSmoke = { done: true, result, lines };
+    throw new Error(result.error);
+  }
+
+  const worker = new Worker(`./worker.mjs${location.search}`, {
+    type: 'module',
+    name: 'wasmbolt-lldb-dap-smoke'
+  });
+  worker.onmessage = event => {
+    const message = event.data;
+    if (message?.kind === 'log') {
+      record(message.value);
+      return;
+    }
+    if (message?.kind === 'result') {
+      record(message.value);
+      window.__wasmboltSmoke = {
+        done: true,
+        result: message.value,
+        lines
+      };
+      worker.terminate();
+    }
+  };
+  worker.onerror = event => {
+    const result = {
+      ok: false,
+      error:
+        `${event.message} (${event.filename}:` +
+        `${event.lineno}:${event.colno})`
+    };
+    record(result);
+    window.__wasmboltSmoke = { done: true, result, lines };
+    worker.terminate();
+  };
+</script>

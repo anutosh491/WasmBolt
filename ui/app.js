@@ -1,5 +1,6 @@
 import { updateDebuggerTarget } from "./debugger-target.js";
 import { installClangd } from "../language-services/clangd/ui.js";
+import { installDebugger, prepareDebugger, workspaceExampleNames, loadWorkspaceExamples } from "../debugger/lldb/ui.js";
 import { examples } from "./examples.js";
 import { publicFunctionExports, displayFunctionExport, parseWasmFunctionSignatures } from "../runtime/exports.js";
 import { runTool, isToolCommand, workspaceFiles } from "../tools/client.js";
@@ -58,6 +59,12 @@ let activeStderrCapture = null;
 let activeTab = "ir";
 let sourcePath = "";
 const sourceBreakpoints = new Map();
+const defaultSources = new Map([
+  ["/workspace/snippet.cpp", examples.cpp], ["/workspace/input.mlir", examples.mlir],
+]);
+const workspaceSources = new Map(defaultSources);
+let debuggerUi = null;
+let debugLocation = null;
 let resourceDir = "/lib/clang/23";
 let runtimeTriple = "wasm32-unknown-emscripten";
 let currentModulePath = "";
@@ -110,6 +117,7 @@ function setBusy(value, message = "Working…") {
   $("#new-file").disabled = value || !compiler;
   $("#debugger-target").disabled = value || !compiler;
   if (value) setStatus(message, "loading");
+  debuggerUi?.update();
 }
 
 function languageSettings() {
@@ -126,8 +134,8 @@ function languageSettings() {
   if (elements.language.value === "llvm") {
     return {
       driver: "",
-      filename: sourcePath || "/workspace/input.ll",
-      label: "input.ll",
+      filename: sourcePath || "/workspace/debug.ll",
+      label: "debug.ll",
       standard: "",
       x: "",
       llvmIr: true,
@@ -136,8 +144,8 @@ function languageSettings() {
   const cpp = elements.language.value === "cpp";
   return {
     driver: cpp ? "clang++" : "clang",
-    filename: sourcePath || (cpp ? "/workspace/snippet.cpp" : "/workspace/snippet.c"),
-    label: cpp ? "snippet.cpp" : "snippet.c",
+    filename: sourcePath || (cpp ? "/workspace/snippet.cpp" : "/workspace/simple.c"),
+    label: cpp ? "snippet.cpp" : "simple.c",
     standard: cpp ? "-std=c++23" : "-std=c23",
     x: cpp ? "c++" : "c",
   };
@@ -146,14 +154,17 @@ function languageSettings() {
 function writeSource() {
   const settings = languageSettings();
   elements.filename.textContent = settings.filename.replace("/workspace/", "");
-  compiler.FS.mkdirTree(settings.filename.slice(0, settings.filename.lastIndexOf("/")));
-  compiler.FS.writeFile(settings.filename, elements.source.value);
+  workspaceSources.set(settings.filename, elements.source.value);
+  if (compiler) {
+    compiler.FS.mkdirTree(settings.filename.slice(0, settings.filename.lastIndexOf("/")));
+    compiler.FS.writeFile(settings.filename, elements.source.value);
+  }
   refreshWorkspaceFiles(settings.filename);
   return settings;
 }
 
 function readText(path) {
-  return compiler.FS.readFile(path, { encoding: "utf8" });
+  return compiler ? compiler.FS.readFile(path, { encoding: "utf8" }) : workspaceSources.get(path);
 }
 
 function removeIfPresent(path) {
@@ -204,7 +215,8 @@ async function renderDot(dotPath, svgPath, description) {
 }
 
 function refreshWorkspaceFiles(preferred = "") {
-  const files = workspaceFiles(compiler.FS);
+  const files = compiler ? workspaceFiles(compiler.FS)
+    : [...new Set([...workspaceExampleNames.map(name => `/workspace/${name}`), ...workspaceSources.keys()])].sort();
   const previous = preferred || elements.fileSelect.value;
   elements.fileSelect.replaceChildren();
   for (const path of files) {
@@ -216,13 +228,15 @@ function refreshWorkspaceFiles(preferred = "") {
   if (files.includes(previous)) elements.fileSelect.value = previous;
   outputs.files = files.length
     ? files.map((path) => {
-        const size = compiler.FS.stat(path).size;
+        const size = compiler ? compiler.FS.stat(path).size
+          : new TextEncoder().encode(workspaceSources.get(path) || "").length;
         return `${path.replace("/workspace/", "").padEnd(28)} ${String(size).padStart(9)} bytes`;
       }).join("\n")
     : "The browser filesystem is empty.";
   if (activeTab === "files") elements.output.textContent = outputs.files;
   renderExplorer(files);
-  updateDebuggerTarget(files, languageSettings().filename);
+  if (debuggerUi) debuggerUi.update();
+  else updateDebuggerTarget(files, languageSettings().filename);
 }
 
 function renderSourceGutter() {
@@ -236,11 +250,13 @@ function renderSourceGutter() {
     const button = document.createElement("button");
     button.textContent = String(line);
     button.dataset.line = line;
+    button.classList.toggle("current-line", debugLocation?.path === path && debugLocation.line === line);
     button.setAttribute("aria-label", `Breakpoint at line ${line}`);
     button.setAttribute("aria-pressed", String(lines.has(line)));
     button.addEventListener("click", () => {
       if (lines.has(line)) lines.delete(line); else lines.add(line);
       button.setAttribute("aria-pressed", String(lines.has(line)));
+      debuggerUi?.syncBreakpoints(path, [...lines]);
     });
     return button;
   }));
@@ -252,6 +268,7 @@ function renderExplorer(files) {
     const button = document.createElement("button");
     button.textContent = path.replace("/workspace/", "");
     button.title = path;
+    button.disabled = !compiler && !workspaceSources.has(path);
     const extension = path.split(".").pop().toLowerCase();
     button.dataset.kind = ({ c: "C", cc: "C++", cpp: "C++", cxx: "C++", ll: "IR", mlir: "ML", wasm: "W" })[extension] || "·";
     button.setAttribute("aria-current", String(path === languageSettings().filename));
@@ -261,7 +278,7 @@ function renderExplorer(files) {
 }
 
 function editWorkspaceFile(path) {
-  if (!compiler || busy) return;
+  if (busy || (!compiler && !workspaceSources.has(path))) return;
   const language = /\.c$/i.test(path) ? "c" : /\.(cc|cpp|cxx)$/i.test(path) ? "cpp"
     : /\.ll$/i.test(path) ? "llvm" : /\.mlir$/i.test(path) ? "mlir" : "";
   if (!language) { toggleDebugger(false); openWorkspaceFile(path); return; }
@@ -280,6 +297,10 @@ function toggleDebugger(visible) {
   $("#debugger-panel").classList.toggle("hidden", !visible);
   $(".output-pane").classList.toggle("hidden", visible);
   $("#toggle-debugger").setAttribute("aria-expanded", String(visible));
+  if (visible) {
+    if (debuggerUi) debuggerUi.preload();
+    else prepareDebugger();
+  }
 }
 
 function isTextFile(path) {
@@ -316,7 +337,8 @@ function openWorkspaceFile(path = elements.fileSelect.value) {
 function downloadWorkspaceFile() {
   const path = elements.fileSelect.value;
   if (!path) return;
-  const bytes = compiler.FS.readFile(path);
+  const bytes = compiler ? compiler.FS.readFile(path)
+    : new TextEncoder().encode(workspaceSources.get(path) || "");
   const url = URL.createObjectURL(new Blob([bytes]));
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -645,7 +667,7 @@ function configureSelectedSymbol() {
 function resetSource() {
   sourcePath = "";
   const language = elements.language.value;
-  elements.source.value = examples[language];
+  elements.source.value = defaultSources.get(languageSettings().filename) ?? examples[language];
   elements.filename.textContent = languageSettings().label;
   currentModulePath = "";
   wasmExportSignatures = new Map();
@@ -654,12 +676,12 @@ function resetSource() {
   elements.runner.classList.add("hidden");
   saveState();
   updateLanguageUi();
-  if (compiler) writeSource();
+  writeSource();
   renderSourceGutter();
 }
 
 function updateLanguageUi() {
-  updateDebuggerTarget(compiler ? workspaceFiles(compiler.FS) : [], languageSettings().filename);
+  if (!debuggerUi) updateDebuggerTarget(compiler ? workspaceFiles(compiler.FS) : [], languageSettings().filename);
   const isLlvmIr = elements.language.value === "llvm";
   const isMlir = elements.language.value === "mlir";
   const astTab = document.querySelector('[data-tab="ast"]');
@@ -673,6 +695,7 @@ function updateLanguageUi() {
   if (isMlir && activeTab !== "mlir") switchTab("mlir");
   if (!isMlir && activeTab === "mlir") switchTab("ir");
   if (isLlvmIr && activeTab === "ast") switchTab("ir");
+  debuggerUi?.update();
 }
 
 function serializableState() {
@@ -879,18 +902,24 @@ function wireUi() {
   updateLanguageUi();
 }
 
-async function loadCompiler() {
+async function loadCompiler(workspaceReady) {
   try {
     setStatus("Downloading Clang and LLVM…", "loading");
     const { default: createCompiler } = await import("../runtime/Compiler.js");
-    compiler = await createCompiler({
+    const loadedCompiler = await createCompiler({
       locateFile: (path) => new URL(`../runtime/${path}`, import.meta.url).href,
       print: (line) => appendLog(line),
       printErr: (line) => appendLog(line, "err"),
       setStatus: (text) => { if (text) setStatus(text, "loading"); },
     });
+    await workspaceReady;
+    compiler = loadedCompiler;
     compiler.FS.mkdirTree("/workspace");
     compiler.FS.chdir("/workspace");
+    for (const [path, source] of workspaceSources) {
+      compiler.FS.mkdirTree(path.slice(0, path.lastIndexOf("/")));
+      compiler.FS.writeFile(path, source);
+    }
     writeSource();
 
     const version = compiler.ccall("wasmbolt_version", "string", [], []);
@@ -931,6 +960,30 @@ async function loadCompiler() {
       files: () => workspaceFiles(compiler.FS),
       open: editWorkspaceFile,
     });
+    debuggerUi = await installDebugger({
+      FS: compiler.FS, source: writeSource, open: editWorkspaceFile, run,
+      files: () => workspaceFiles(compiler.FS),
+      sourceName: () => languageSettings().filename,
+      refresh: () => refreshWorkspaceFiles(),
+      breakpoints: () => sourceBreakpoints,
+      language: () => elements.language.value,
+      arch: () => document.body.dataset.runtimeArch,
+      target: () => elements.target.value,
+      resourceDir: () => resourceDir, busy: () => busy,
+      location: location => {
+        debugLocation = location;
+        if (location?.path.startsWith("/workspace/") && sourcePath !== location.path) {
+          try { compiler.FS.stat(location.path); editWorkspaceFile(location.path); } catch (_) {}
+        }
+        renderSourceGutter();
+        if (location && languageSettings().filename === location.path) {
+          elements.source.scrollTop = Math.max(0, (location.line - 5) * parseFloat(getComputedStyle(elements.source).lineHeight));
+          $("#source-gutter").scrollTop = elements.source.scrollTop;
+        }
+      },
+    });
+    elements.target.addEventListener("change", () => debuggerUi.update());
+    if ($("#toggle-debugger").getAttribute("aria-expanded") === "true") debuggerUi.preload();
     const autorun = new URLSearchParams(location.search).get("autorun");
     if (autorun === "1" || autorun === "driver") {
       const settings = writeSource();
@@ -987,7 +1040,24 @@ if (["c", "cpp", "mlir", "llvm"].includes(requestedLanguage)) {
 }
 wireUi();
 switchTab("ir");
+writeSource();
+const workspaceReady = (async () => {
+  for (const [name, source] of Object.entries(await loadWorkspaceExamples())) {
+    const path = `/workspace/${name}`;
+    defaultSources.set(path, source);
+    if (!workspaceSources.has(path)) workspaceSources.set(path, source);
+  }
+  // Keep custom restored/typed code, but use the complete example for untouched defaults.
+  if (elements.source.value === examples[elements.language.value])
+    elements.source.value = defaultSources.get(languageSettings().filename) ?? elements.source.value;
+  writeSource();
+  const example = startupParameters.get("example");
+  if (workspaceExampleNames.includes(example)) editWorkspaceFile(`/workspace/${example}`);
+})();
+// Attach a rejection handler while the large compiler download is in flight.
+workspaceReady.catch(error => appendLog(error.message, "err"));
+if (startupParameters.get("debugger") === "1") toggleDebugger(true);
 // Keep the document's load event pending until the asynchronous compiler
 // initialization (and an optional CI autorun) has completed. This gives
 // headless browsers a deterministic readiness boundary.
-await loadCompiler();
+await loadCompiler(workspaceReady);

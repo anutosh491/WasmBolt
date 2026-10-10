@@ -162,3 +162,8 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
   .resizer { display: none; }
   footer { flex-wrap: wrap; }
 }
+
+.source-gutter button.current-line { color: #f3cf64; background: #514326; box-shadow: inset -3px 0 #f3cf64; }
+.debugger-variable { font-family: var(--font-mono, monospace); font-size: 12px; padding: 5px 0; overflow-wrap: anywhere; }
+#debugger-frames button { display: block; width: 100%; padding: 6px; text-align: left; font-size: 12px; margin-bottom: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.debugger-notice { color: var(--muted); }
