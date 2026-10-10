@@ -1,4 +1,5 @@
 import { updateDebuggerTarget } from "./debugger-target.js";
+import { installClangd } from "../language-services/clangd/ui.js";
 import { examples } from "./examples.js";
 import { publicFunctionExports, displayFunctionExport, parseWasmFunctionSignatures } from "../runtime/exports.js";
 import { runTool, isToolCommand, workspaceFiles } from "../tools/client.js";
@@ -923,6 +924,14 @@ async function loadCompiler() {
     elements.log.textContent = "";
     setBusy(false);
     setStatus("Compiler ready");
+    installClangd({
+      FS: compiler.FS,
+      get resourceDir() { return resourceDir; },
+      source: () => ({ path: languageSettings().filename, text: elements.source.value,
+        language: elements.language.value, target: elements.target.value }),
+      files: () => workspaceFiles(compiler.FS),
+      open: editWorkspaceFile,
+    });
     const autorun = new URLSearchParams(location.search).get("autorun");
     if (autorun === "1" || autorun === "driver") {
       const settings = writeSource();

@@ -22,6 +22,7 @@ LLVM CFG -> opt in a Worker -> DOT -> Graphviz in a Worker -> SVG
 - tensor-based MLIR input, the complete `mlir-opt` dialect/pass registry, and
   `mlir-translate` for translation to LLVM IR;
 - Clang diagnostics and textual AST dumps;
+- optional clangd completion, diagnostics and definitions for C/C++ editing;
 - unoptimized and optimized LLVM IR;
 - configurable new-pass-manager pipelines such as `default<O2>`;
 - LLVM `dot-cfg` output rendered to SVG by the Graphviz tool;
@@ -87,7 +88,12 @@ Workers and return their generated files to the shared browser workspace.
 Each command gets a fresh Worker to isolate tool shutdown and command-line state.
 
 Source lives in `ui/`, `compilers/clang/`, `linkers/wasm-ld/`, `runtime/` and
-`tools/`. `debugger/` holds the future LLDB placeholder; `scripts/` handles builds.
+`tools/`. `language-services/clangd/` runs the packaged language server in a
+persistent Worker. `debugger/` holds the future LLDB placeholder; `scripts/` handles builds.
+
+Click **Enable clangd** for C/C++ suggestions beside the caret. **Tab** accepts,
+**Ctrl+Space** requests completion, **F8** visits diagnostics and **F12** opens a
+definition. Disable clangd stops its Worker; re-enabling starts a fresh session.
 
 ## Why this is different
 
@@ -173,6 +179,13 @@ The Pages workflow builds from emscripten-forge packages, checks the deployment
 artifacts, and deploys the `site` directory. In the repository settings, select
 **Settings → Pages → Source: GitHub Actions**. Every repository created from
 the template builds and deploys its own independent site.
+
+Clangd uses pthreads in its own module; the compiler/linker runtime stays
+non-threaded. HTTPS (or localhost) and cross-origin isolation are required for
+clangd. On Pages, the bundled [coi-serviceworker](https://github.com/gzuidhof/coi-serviceworker)
+v0.1.7 supplies COOP/COEP and reloads on first visit. Hosts with those headers
+already configured need no reload. If isolation is unavailable, compilation
+still works and clangd reports the missing requirement.
 
 WasmBolt's application code is MIT-licensed. LLVM, Clang, LLD and their
 packaged artifacts retain the Apache-2.0 WITH LLVM-exception license.

@@ -1,0 +1,8 @@
+.source-pane { position: relative; }
+.clangd-toolbar { display: flex; align-items: center; gap: 8px; min-height: 33px; padding: 3px 10px; border-top: 1px solid var(--border); background: var(--panel-2); font-size: 11px; }
+.clangd-toolbar button { font-size: 11px; padding: 3px 7px; white-space: nowrap; }
+#clangd-hint { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#clangd-problems[data-errors]:not([data-errors="0"]) { color: #f48771; }
+#clangd-results { position: absolute; z-index: 5; max-height: 245px; overflow: auto; padding: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); box-shadow: 0 8px 24px #0008; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+#clangd-results button { display: block; width: 100%; border: none; border-radius: 3px; text-align: left; font: inherit; padding: 4px 7px; background: transparent; }
+#clangd-results button:hover, #clangd-results button.selected { background: #243955; }
