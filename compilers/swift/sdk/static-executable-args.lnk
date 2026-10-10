@@ -1,0 +1,14 @@
+-nostdlib
+-Wl,--no-stack-first
+-L/swift/lib/swift/emscripten/wasm32
+-lswiftCommandLineSupport
+/lib/wasm32-emscripten/crt1.o
+-L/lib/wasm32-emscripten
+-lstandalonewasm-nocatch
+-lstubs-debug
+-lc-debug
+-ldlmalloc-debug
+-lclang_rt.builtins
+-lc++-debug-noexcept
+-lc++abi-debug-noexcept
+-Wl,--threads=1,--export-if-defined=__main_argc_argv,--export=__wasm_call_ctors,--export-dynamic,--export-memory,-z,stack-size=16777216

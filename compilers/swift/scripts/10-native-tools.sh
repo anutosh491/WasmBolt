@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
+
+"${CMAKE}" -S "${LLVM_SOURCE_DIR}/llvm" -B "${NATIVE_LLVM_DIR}" -G Ninja \
+  -DCMAKE_MAKE_PROGRAM="${NINJA}" -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_C_COMPILER="$(xcrun -f clang)" \
+  -DCMAKE_CXX_COMPILER="$(xcrun -f clang++)" \
+  -DLLVM_ENABLE_PROJECTS='clang;lld' \
+  -DLLVM_TARGETS_TO_BUILD='AArch64;WebAssembly' \
+  -DLLVM_ENABLE_ASSERTIONS=OFF -DLLVM_ENABLE_ZLIB=OFF -DLLVM_ENABLE_ZSTD=OFF \
+  -DLLVM_ENABLE_LIBXML2=OFF -DLLVM_ENABLE_LIBEDIT=OFF \
+  -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF \
+  -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_DOCS=OFF \
+  -DCLANG_ENABLE_STATIC_ANALYZER=OFF -DCLANG_ENABLE_OBJC_REWRITER=OFF \
+  -DCLANG_BUILD_TOOLS=OFF \
+  -DLLVM_PARALLEL_LINK_JOBS=1
+
+"${CMAKE}" --build "${NATIVE_LLVM_DIR}" --parallel "${JOBS}" \
+  --target llvm-tblgen clang-tblgen llvm-ar llvm-ranlib

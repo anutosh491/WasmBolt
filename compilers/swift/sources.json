@@ -1,0 +1,26 @@
+{
+  "swift": {
+    "revision": "6b8daddf6f30bb1bbdcaaede7f673e76eb155278",
+    "url": "https://github.com/swiftlang/swift.git"
+  },
+  "llvm": {
+    "revision": "ab70a4c40271da180ff2fcf2d92cd24bee8a2cb3",
+    "url": "https://github.com/swiftlang/llvm-project.git"
+  },
+  "cmark": {
+    "revision": "0c8947bbd58c491c54aae114aca40621cddc8357",
+    "url": "https://github.com/swiftlang/swift-cmark.git"
+  },
+  "stringProcessing": {
+    "revision": "a6ac4f725d0a28e8fa01ed2a2f23b97add65b776",
+    "url": "https://github.com/swiftlang/swift-experimental-string-processing.git"
+  },
+  "emscripten": {
+    "version": "6.0.8",
+    "channel": "emscripten-forge-6x"
+  },
+  "previousRepl": {
+    "revision": "701fac3e1f7c9b2879c89cc2e3de0ac32de10192",
+    "url": "https://github.com/anutosh491/swift/tree/emscripten-repl"
+  }
+}

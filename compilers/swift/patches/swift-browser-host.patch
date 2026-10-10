@@ -1,0 +1,124 @@
+diff --git a/cmake/modules/SwiftSharedCMakeConfig.cmake b/cmake/modules/SwiftSharedCMakeConfig.cmake
+index 647516983f1..8b9176baa45 100644
+--- a/cmake/modules/SwiftSharedCMakeConfig.cmake
++++ b/cmake/modules/SwiftSharedCMakeConfig.cmake
+@@ -189,6 +189,11 @@ macro(swift_common_standalone_build_config_llvm product)
+ endmacro()
+ 
+ macro(swift_common_standalone_build_config_clang product)
++  # The Emscripten Clang interpreter exports references to LLD's Wasm driver.
++  # Import those targets before Clang checks its transitive dependencies.
++  if(EMSCRIPTEN AND LLD_DIR)
++    find_package(LLD CONFIG REQUIRED NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
++  endif()
+   find_package(Clang CONFIG REQUIRED NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+ 
+   if (NOT CMAKE_CROSSCOMPILING AND NOT SWIFT_PREBUILT_CLANG)
+diff --git a/include/swift/AST/Identifier.h b/include/swift/AST/Identifier.h
+index 5de8cc04f42..c284f27c03d 100644
+--- a/include/swift/AST/Identifier.h
++++ b/include/swift/AST/Identifier.h
+@@ -502,7 +502,10 @@ class DeclName {
+   friend class ASTContext;
+ 
+   /// Represents a compound declaration name.
+-  struct alignas(Identifier) CompoundDeclName final : llvm::FoldingSetNode,
++  // DeclName's pointer traits reserve three low bits before the union tag.
++  // Identifier itself is only pointer-aligned on a 32-bit host.
++  struct alignas(Identifier::RequiredAlignment) CompoundDeclName final
++      : llvm::FoldingSetNode,
+       private llvm::TrailingObjects<CompoundDeclName, Identifier> {
+     friend TrailingObjects;
+     friend class DeclName;
+diff --git a/include/swift/RemoteInspection/ReflectionContext.h b/include/swift/RemoteInspection/ReflectionContext.h
+index 54504bb8a6a..d61545eecc4 100644
+--- a/include/swift/RemoteInspection/ReflectionContext.h
++++ b/include/swift/RemoteInspection/ReflectionContext.h
+@@ -2138,7 +2138,7 @@ private:
+       // This cuts off high bits if our size_t doesn't match the target's. We
+       // only read the Kind bits which are at the bottom, so that's OK here.
+       // Beware of this when reading anything else.
+-      TaskStatusRecordFlags Flags{RecordObj->Flags};
++      TaskStatusRecordFlags Flags{static_cast<size_t>(RecordObj->Flags)};
+       auto Kind = Flags.getKind();
+ 
+       StoredPointer ChildTask = 0;
+diff --git a/lib/Driver/Driver.cpp b/lib/Driver/Driver.cpp
+index dd09347cbe6..5e01be11b20 100644
+--- a/lib/Driver/Driver.cpp
++++ b/lib/Driver/Driver.cpp
+@@ -451,6 +451,7 @@ Driver::buildToolChain(const llvm::opt::InputArgList &ArgList) {
+   case llvm::Triple::WASIp1:
+   case llvm::Triple::WASIp2:
+   case llvm::Triple::WASIp3:
++  case llvm::Triple::Emscripten:
+     return std::make_unique<toolchains::WebAssembly>(*this, target);
+   case llvm::Triple::UnknownOS:
+     return std::make_unique<toolchains::GenericUnix>(*this, target);
+diff --git a/lib/SIL/IR/SILInstructions.cpp b/lib/SIL/IR/SILInstructions.cpp
+index ae534f53a82..9ebb603452d 100644
+--- a/lib/SIL/IR/SILInstructions.cpp
++++ b/lib/SIL/IR/SILInstructions.cpp
+@@ -150,32 +150,6 @@ collectTypeDependentOperands(SmallVectorImpl<SILValue> &typeDependentOperands,
+ // SILInstruction Subclasses
+ //===----------------------------------------------------------------------===//
+ 
+-/// Returns the size of the debug variable data that is tail allocated after an
+-/// instruction's operands.
+-static size_t getDebugVarTrailingDataSize(size_t nameLength, bool hasType,
+-                                       bool hasLoc, bool hasScope,
+-                                       size_t numDIExprElements) {
+-  return nameLength + (hasType ? sizeof(SILType) : 0) +
+-         (hasLoc ? sizeof(SILLocation) : 0) +
+-         (hasScope ? sizeof(const SILDebugScope *) : 0) +
+-         sizeof(SILDIExprElement) * numDIExprElements;
+-}
+-
+-template <typename INST>
+-static void *allocateDebugVarCarryingInst(SILModule &M,
+-                                          std::optional<SILDebugVariable> Var,
+-                                          ArrayRef<SILValue> Operands = {}) {
+-  return M.allocateInst(
+-      sizeof(INST) +
+-          (Var ? getDebugVarTrailingDataSize(
+-                     Var->Name.size(), Var->Type.has_value(),
+-                     Var->Loc.has_value(), Var->Scope != nullptr,
+-                     Var->DIExpr.getNumElements())
+-               : 0) +
+-          sizeof(Operand) * Operands.size(),
+-      alignof(INST));
+-}
+-
+ TailAllocatedDebugVariable::TailAllocatedDebugVariable(
+     std::optional<SILDebugVariable> Var, char *buf, SILType *AuxVarType,
+     SILLocation *DeclLoc, const SILDebugScope **DeclScope,
+@@ -283,8 +257,14 @@ AllocStackInst *AllocStackInst::create(SILDebugLocation Loc,
+   SmallVector<SILValue, 8> TypeDependentOperands;
+   collectTypeDependentOperands(TypeDependentOperands, F,
+                                elementType.getASTType());
+-  void *Buffer = allocateDebugVarCarryingInst<AllocStackInst>(
+-      F.getModule(), Var, TypeDependentOperands);
++  // Trailing fields can have different alignments, particularly on 32-bit
++  // hosts. Summing their sizes misses the padding before SILLocation.
++  auto Size = totalSizeToAlloc<SILType, SILLocation, const SILDebugScope *,
++                              Operand, char>(
++      Var && Var->Type ? 1 : 0, Var && Var->Loc ? 1 : 0,
++      Var && Var->Scope ? 1 : 0, TypeDependentOperands.size(),
++      Var ? Var->Name.size() : 0);
++  void *Buffer = F.getModule().allocateInst(Size, alignof(AllocStackInst));
+   return ::new (Buffer)
+       AllocStackInst(Loc, elementType, TypeDependentOperands, F, Var,
+                      hasDynamicLifetime, isLexical, isFromVarDecl, wasMoved);
+@@ -484,7 +464,11 @@ DebugValueInst *DebugValueInst::create(SILDebugLocation DebugLoc,
+   if (prependDeref) {
+     Var.DIExpr.eraseElement(Var.DIExpr.element_begin());
+   }
+-  void *buf = allocateDebugVarCarryingInst<DebugValueInst>(M, Var, Operands);
++  auto Size = totalSizeToAlloc<Operand, SILType, SILLocation,
++                              const SILDebugScope *, SILDIExprElement, char>(
++      Operands.size(), Var.Type ? 1 : 0, Var.Loc ? 1 : 0,
++      Var.Scope ? 1 : 0, Var.DIExpr.getNumElements(), Var.Name.size());
++  void *buf = M.allocateInst(Size, alignof(DebugValueInst));
+   return ::new (buf)
+     DebugValueInst(DebugLoc, Operands, M, Var, wasMoved, trace, prependDeref);
+ }

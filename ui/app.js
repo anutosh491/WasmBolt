@@ -3,8 +3,14 @@ import { installClangd } from "../language-services/clangd/ui.js";
 import { examples } from "./examples.js";
 import { publicFunctionExports, displayFunctionExport, parseWasmFunctionSignatures } from "../runtime/exports.js";
 import { runTool, isToolCommand, workspaceFiles } from "../tools/client.js";
+import { tokenize } from "../tools/registry.js";
+import { prepareSwift, runSwift } from "../compilers/swift/client.js";
+import { driver as swiftDriver, link as swiftLink } from "../compilers/swift/commands.js";
+import { runStandalone } from "../compilers/swift/runner.js";
+import { createWorkspace, swiftExampleNames, loadSwiftExamples } from "../compilers/swift/workspace.js";
 
 const $ = (selector) => document.querySelector(selector);
+const swiftOnly = $('meta[name="wasmbolt-compiler"]')?.content === 'swift';
 
 const elements = {
   source: $("#source"),
@@ -38,8 +44,12 @@ const elements = {
   commandLine: $(".command-line"),
 };
 
+const swiftEnabled = !elements.language.querySelector('option[value="swift"]').disabled;
+const workspaceExampleNames = [...(swiftOnly ? [] : ['snippet.cpp', 'input.mlir']), ...(swiftEnabled ? swiftExampleNames : [])];
+
 const outputs = {
   ast: "",
+  sil: "",
   mlir: "Select MLIR and compile, or use mlir-opt from the advanced terminal.",
   ir: "",
   optimized: "",
@@ -58,8 +68,13 @@ let activeStderrCapture = null;
 let activeTab = "ir";
 let sourcePath = "";
 const sourceBreakpoints = new Map();
+const defaultSources = new Map([
+  ...(swiftOnly ? [] : [["/workspace/snippet.cpp", examples.cpp], ["/workspace/input.mlir", examples.mlir]]),
+]);
+const workspaceSources = new Map(defaultSources);
 let resourceDir = "/lib/clang/23";
 let runtimeTriple = "wasm32-unknown-emscripten";
+let runtimeVersion = "LLVM 23.1.2", targetSupport = {};
 let currentModulePath = "";
 let buildNumber = 0;
 let busy = false;
@@ -113,6 +128,10 @@ function setBusy(value, message = "Working…") {
 }
 
 function languageSettings() {
+  if (elements.language.value === "swift") {
+    return { driver: "swiftc", filename: sourcePath || "/workspace/fibonacci.swift",
+      label: "fibonacci.swift", swift: true };
+  }
   if (elements.language.value === "mlir") {
     return {
       driver: "mlir-opt",
@@ -126,8 +145,8 @@ function languageSettings() {
   if (elements.language.value === "llvm") {
     return {
       driver: "",
-      filename: sourcePath || "/workspace/input.ll",
-      label: "input.ll",
+      filename: sourcePath || "/workspace/debug.ll",
+      label: "debug.ll",
       standard: "",
       x: "",
       llvmIr: true,
@@ -136,8 +155,8 @@ function languageSettings() {
   const cpp = elements.language.value === "cpp";
   return {
     driver: cpp ? "clang++" : "clang",
-    filename: sourcePath || (cpp ? "/workspace/snippet.cpp" : "/workspace/snippet.c"),
-    label: cpp ? "snippet.cpp" : "snippet.c",
+    filename: sourcePath || (cpp ? "/workspace/snippet.cpp" : "/workspace/simple.c"),
+    label: cpp ? "snippet.cpp" : "simple.c",
     standard: cpp ? "-std=c++23" : "-std=c23",
     x: cpp ? "c++" : "c",
   };
@@ -146,14 +165,17 @@ function languageSettings() {
 function writeSource() {
   const settings = languageSettings();
   elements.filename.textContent = settings.filename.replace("/workspace/", "");
-  compiler.FS.mkdirTree(settings.filename.slice(0, settings.filename.lastIndexOf("/")));
-  compiler.FS.writeFile(settings.filename, elements.source.value);
+  workspaceSources.set(settings.filename, elements.source.value);
+  if (compiler) {
+    compiler.FS.mkdirTree(settings.filename.slice(0, settings.filename.lastIndexOf("/")));
+    compiler.FS.writeFile(settings.filename, elements.source.value);
+  }
   refreshWorkspaceFiles(settings.filename);
   return settings;
 }
 
 function readText(path) {
-  return compiler.FS.readFile(path, { encoding: "utf8" });
+  return compiler ? compiler.FS.readFile(path, { encoding: "utf8" }) : workspaceSources.get(path);
 }
 
 function removeIfPresent(path) {
@@ -204,7 +226,8 @@ async function renderDot(dotPath, svgPath, description) {
 }
 
 function refreshWorkspaceFiles(preferred = "") {
-  const files = workspaceFiles(compiler.FS);
+  const files = compiler ? workspaceFiles(compiler.FS)
+    : [...new Set([...(workspaceExampleNames).map(name => `/workspace/${name}`), ...workspaceSources.keys()])].sort();
   const previous = preferred || elements.fileSelect.value;
   elements.fileSelect.replaceChildren();
   for (const path of files) {
@@ -216,7 +239,8 @@ function refreshWorkspaceFiles(preferred = "") {
   if (files.includes(previous)) elements.fileSelect.value = previous;
   outputs.files = files.length
     ? files.map((path) => {
-        const size = compiler.FS.stat(path).size;
+        const size = compiler ? compiler.FS.stat(path).size
+          : new TextEncoder().encode(workspaceSources.get(path) || "").length;
         return `${path.replace("/workspace/", "").padEnd(28)} ${String(size).padStart(9)} bytes`;
       }).join("\n")
     : "The browser filesystem is empty.";
@@ -252,8 +276,9 @@ function renderExplorer(files) {
     const button = document.createElement("button");
     button.textContent = path.replace("/workspace/", "");
     button.title = path;
+    button.disabled = !compiler && !workspaceSources.has(path);
     const extension = path.split(".").pop().toLowerCase();
-    button.dataset.kind = ({ c: "C", cc: "C++", cpp: "C++", cxx: "C++", ll: "IR", mlir: "ML", wasm: "W" })[extension] || "·";
+    button.dataset.kind = ({ c: "C", cc: "C++", cpp: "C++", cxx: "C++", swift: "S", ll: "IR", mlir: "ML", wasm: "W" })[extension] || "·";
     button.setAttribute("aria-current", String(path === languageSettings().filename));
     button.addEventListener("click", () => editWorkspaceFile(path));
     return button;
@@ -261,10 +286,13 @@ function renderExplorer(files) {
 }
 
 function editWorkspaceFile(path) {
-  if (!compiler || busy) return;
+  if (busy || (!compiler && !workspaceSources.has(path))) return;
   const language = /\.c$/i.test(path) ? "c" : /\.(cc|cpp|cxx)$/i.test(path) ? "cpp"
-    : /\.ll$/i.test(path) ? "llvm" : /\.mlir$/i.test(path) ? "mlir" : "";
-  if (!language) { toggleDebugger(false); openWorkspaceFile(path); return; }
+    : /\.ll$/i.test(path) ? "llvm" : /\.mlir$/i.test(path) ? "mlir"
+    : /\.swift$/i.test(path) ? "swift" : "";
+  if (!language || (swiftOnly && language !== 'swift')) {
+    toggleDebugger(false); openWorkspaceFile(path); return;
+  }
   // Save the editor before switching files, including edits never compiled.
   writeSource();
   sourcePath = path;
@@ -280,10 +308,11 @@ function toggleDebugger(visible) {
   $("#debugger-panel").classList.toggle("hidden", !visible);
   $(".output-pane").classList.toggle("hidden", visible);
   $("#toggle-debugger").setAttribute("aria-expanded", String(visible));
+
 }
 
 function isTextFile(path) {
-  return /\.(?:c|cc|cpp|cxx|h|hpp|mlir|ll|mir|s|dot|svg|txt|json)$/i.test(path);
+  return /\.(?:c|cc|cpp|cxx|h|hpp|swift|sil|mlir|ll|mir|s|dot|svg|txt|json)$/i.test(path);
 }
 
 function openWorkspaceFile(path = elements.fileSelect.value) {
@@ -316,7 +345,8 @@ function openWorkspaceFile(path = elements.fileSelect.value) {
 function downloadWorkspaceFile() {
   const path = elements.fileSelect.value;
   if (!path) return;
-  const bytes = compiler.FS.readFile(path);
+  const bytes = compiler ? compiler.FS.readFile(path)
+    : new TextEncoder().encode(workspaceSources.get(path) || "");
   const url = URL.createObjectURL(new Blob([bytes]));
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -358,6 +388,10 @@ function commandText(settings, action, target = elements.target.value) {
 
 async function run(command, redirects = {}) {
   appendLog("");
+  const argv = tokenize(command);
+  const swiftCommand = ['swift', 'swiftc', 'swift-frontend'].includes(argv[0]) ||
+    (argv[0] === 'wasm-ld' && elements.language.value === 'swift');
+  if (swiftCommand) appendLog(`$ ${command}`);
   activeCapture = [];
   activeLogCapture = [];
   activeStdoutCapture = [];
@@ -368,7 +402,12 @@ async function run(command, redirects = {}) {
   let capturedStdout;
   let capturedStderr;
   try {
-    if (isToolCommand(command)) {
+    if (swiftCommand) {
+      const result = await runSwift(argv, compiler.FS);
+      for (const line of result.stdout) appendLog(line);
+      for (const line of result.stderr) appendLog(line, "err");
+      code = result.code;
+    } else if (isToolCommand(command)) {
       appendLog(`$ ${command}`);
       const result = await runTool(command, compiler.FS);
       for (const line of result.stdout) appendLog(line);
@@ -440,12 +479,21 @@ async function emitClangOutput(settings, stage, target = elements.target.value) 
 
 async function compileSelectedOutput() {
   if (busy) return;
-  let stage = activeTab === "wasm" || activeTab === "files" ? "ir" : activeTab;
+  let stage = activeTab === "files" ? "ir" : activeTab;
+  if (stage === "wasm" && elements.language.value !== "swift") stage = "ir";
   if (elements.language.value === "mlir" && stage !== "cfg") stage = "mlir";
   setBusy(true, `Compiling ${stage === "cfg" ? "control-flow graph" : stage}…`);
   try {
     const settings = writeSource();
-    if (settings.mlir) {
+    if (settings.swift) {
+      if (stage === "cfg") {
+        await emitSwiftOutput(settings, "optimized");
+        await renderCfg();
+      } else if (stage === "wasm") {
+        await buildSwift(settings, "/workspace/simple.wasm");
+        await activateWasm("/workspace/simple.wasm");
+      } else await emitSwiftOutput(settings, stage);
+    } else if (settings.mlir) {
       removeIfPresent("/workspace/optimized.mlir");
       await run("mlir-opt --pass-pipeline=builtin.module(canonicalize,cse) /workspace/input.mlir -o /workspace/optimized.mlir");
       outputs.mlir = readText("/workspace/optimized.mlir");
@@ -476,11 +524,36 @@ async function compileSelectedOutput() {
   }
 }
 
+async function emitSwiftOutput(settings, stage) {
+  const stages = { ast: ['-dump-ast', '/workspace/ast.txt'],
+    sil: ['-emit-sil', '/workspace/output.sil'],
+    ir: ['-emit-ir', '/workspace/source.ll'],
+    optimized: ['-emit-ir', '/workspace/optimized.ll'],
+    assembly: ['-S', '/workspace/output.s'] };
+  const [action, path] = stages[stage] || stages.ir;
+  const args = [...swiftDriver(stage === 'ir' ? '0' : elements.optimization.value),
+    action, settings.filename];
+  if (stage !== 'ast') { removeIfPresent(path); args.push('-o', path); }
+  const captured = await run(args.join(' '), stage === 'ast' ? { stdout: path } : {});
+  outputs[stage] = stage === 'ast' ? captured : readText(path);
+}
+
+async function buildSwift(settings, output, debug = false) {
+  const object = debug ? '/workspace/debug.o' : '/workspace/program.o';
+  removeIfPresent(object); removeIfPresent(output);
+  await run([...swiftDriver(elements.optimization.value, debug),
+    '-c', settings.filename, '-o', object].join(' '));
+  await run(swiftLink(object, output).join(' '));
+}
+
 async function inspectWasm(path) {
   const bytes = compiler.FS.readFile(path);
   const module = await WebAssembly.compile(bytes);
   const allExports = WebAssembly.Module.exports(module);
-  const functions = publicFunctionExports(allExports);
+  const functions = publicFunctionExports(allExports)
+    .filter(name => elements.language.value !== 'swift' || !/^(swift_|\$s)/.test(name));
+  if (allExports.some(entry => entry.name === '__main_argc_argv'))
+    functions.unshift('__main_argc_argv');
   wasmExportSignatures = parseWasmFunctionSignatures(bytes);
 
   elements.symbol.replaceChildren();
@@ -491,6 +564,7 @@ async function inspectWasm(path) {
     elements.symbol.append(option);
   }
   const preferred = functions.find((name) => name === "main") ||
+    functions.find((name) => name === "__main_argc_argv") ||
     functions.find((name) => name === "square_plus_one") || functions[0];
   if (preferred) elements.symbol.value = preferred;
 
@@ -548,6 +622,13 @@ async function compileAndRun() {
   lastExecutionResult = null;
   try {
     const settings = writeSource();
+    if (settings.swift) {
+      currentModulePath = `/workspace/program-${++buildNumber}.wasm`;
+      await buildSwift(settings, currentModulePath);
+      await activateWasm(currentModulePath);
+      await executeSymbol();
+      return;
+    }
     removeIfPresent("/workspace/program.o");
     await run(commandText(settings, "object"));
 
@@ -574,7 +655,7 @@ function updateSignatureInputs(argumentsCount = 0) {
   elements.argBWrap.classList.toggle("hidden", argumentsCount < 2);
 }
 
-function executeSymbol() {
+async function executeSymbol() {
   if (!currentModulePath || !elements.symbol.value || !selectedSignature) return;
   const { code: signature, argumentsCount, entryPoint } = selectedSignature;
   const a = Number(elements.argA.value || 0);
@@ -582,6 +663,17 @@ function executeSymbol() {
   const arguments_ = entryPoint ? [] : [a, b].slice(0, argumentsCount);
   const displayName = displayFunctionExport(elements.symbol.value).replace(/ \(C\+\+:.*\)$/, "");
   appendLog(`wasmbolt % ${displayName}(${arguments_.join(", ")})`);
+  if (wasmExportSignatures.has('_start')) {
+    const result = await runStandalone(compiler.FS.readFile(currentModulePath),
+      currentModulePath, elements.symbol.value,
+      { results: signature < 6 ? ['i32'] : [] }, [a, b].slice(0, argumentsCount));
+    if (result.stdout) appendLog(result.stdout.trimEnd());
+    if (result.stderr) appendLog(result.stderr.trimEnd(), 'err');
+    if (result.value.status !== 'success') throw new Error(result.value.message);
+    lastExecutionResult = result.value.value;
+    if (!entryPoint) appendLog(String(lastExecutionResult));
+    return;
+  }
   const result = callSelectedSymbol(signature, entryPoint ? 0 : a, entryPoint ? 0 : b);
   lastExecutionResult = result;
   if (!entryPoint)
@@ -626,7 +718,7 @@ function configureSelectedSymbol() {
     ["void()", { code: 6, argumentsCount: 0 }],
   ]);
   const detected = wasmExportSignatures.get(name);
-  const entryPoint = name === "main" && /^i32\(i32, i(?:32|64)\)$/.test(detected);
+  const entryPoint = ['main', '__main_argc_argv'].includes(name) && /^i32\(i32, i(?:32|64)\)$/.test(detected);
   const callable = entryPoint ? { code: 7, argumentsCount: 0 } : callableSignatures.get(detected);
   selectedSignature = callable
     ? { ...callable, argumentsCount: entryPoint ? 0 : callable.argumentsCount, entryPoint }
@@ -645,7 +737,7 @@ function configureSelectedSymbol() {
 function resetSource() {
   sourcePath = "";
   const language = elements.language.value;
-  elements.source.value = examples[language];
+  elements.source.value = defaultSources.get(languageSettings().filename) ?? examples[language] ?? "";
   elements.filename.textContent = languageSettings().label;
   currentModulePath = "";
   wasmExportSignatures = new Map();
@@ -654,18 +746,35 @@ function resetSource() {
   elements.runner.classList.add("hidden");
   saveState();
   updateLanguageUi();
-  if (compiler) writeSource();
+  writeSource();
   renderSourceGutter();
 }
 
 function updateLanguageUi() {
   updateDebuggerTarget(compiler ? workspaceFiles(compiler.FS) : [], languageSettings().filename);
+  const isSwift = elements.language.value === "swift";
   const isLlvmIr = elements.language.value === "llvm";
   const isMlir = elements.language.value === "mlir";
   const astTab = document.querySelector('[data-tab="ast"]');
   const mlirTab = document.querySelector('[data-tab="mlir"]');
   astTab.disabled = isLlvmIr || isMlir;
   mlirTab.disabled = !isMlir;
+  document.querySelector('[data-tab="sil"]').classList.toggle('hidden', !isSwift);
+  if (!isSwift && activeTab === 'sil') switchTab('ir');
+  if (isSwift && !elements.target.querySelector('option[value="wasm32-unknown-emscripten"]'))
+    elements.target.add(new Option('WebAssembly 32', 'wasm32-unknown-emscripten'));
+  for (const option of elements.target.options)
+    option.disabled = isSwift ? option.value !== 'wasm32-unknown-emscripten'
+      : compiler && !targetSupport[option.value];
+  if (isSwift) elements.target.value = 'wasm32-unknown-emscripten';
+  else if (elements.target.selectedOptions[0]?.disabled) elements.target.value = runtimeTriple;
+  for (const option of elements.optimization.options)
+    { option.textContent = isSwift ? ({0: 'Onone', 1: 'O', 2: 'O', 3: 'Osize'})[option.value] : `O${option.value}`;
+      option.hidden = isSwift && option.value === '1'; }
+  if (isSwift && elements.optimization.value === '1') elements.optimization.value = '2';
+  if (isSwift && compiler) prepareSwift().catch(error => setStatus(error.message, 'error'));
+  elements.version.textContent = isSwift ? 'Swift 6.5-dev · wasm32'
+    : `${runtimeVersion} · ${document.body.dataset.runtimeArch || 'wasm32'}`;
   elements.compileRun.disabled = !compiler || busy || isMlir;
   elements.compileRun.title = isMlir
     ? "MLIR execution requires an explicit lowering and execution pipeline"
@@ -700,6 +809,9 @@ function decodeState(encoded) {
 }
 
 function applyState(state) {
+  if (state.language && ![...elements.language.options].some(option => option.value === state.language && !option.disabled)) {
+    resetSource(); return;
+  }
   for (const key of ["language", "optimization", "target"])
     if (state[key] && elements[key]) elements[key].value = state[key];
   if (/^\/workspace\/[\w./-]+$/.test(state.sourcePath || "") && !state.sourcePath.split("/").includes("..")) sourcePath = state.sourcePath;
@@ -803,9 +915,9 @@ function wireUi() {
   $("#close-debugger").addEventListener("click", () => toggleDebugger(false));
   $("#new-file").addEventListener("click", () => {
     if (!compiler || busy) return;
-    const name = prompt("Source filename (.c, .cpp, .ll or .mlir)", "simple.cpp");
+    const name = prompt("Source filename (.c, .cpp, .ll, .mlir or .swift)", swiftOnly ? "example.swift" : "example.cpp");
     if (name === null) return;
-    if (!/^[\w-]+\.(c|cc|cpp|cxx|ll|mlir)$/i.test(name)) { alert("Use a source filename with letters, digits, hyphens or underscores."); return; }
+    if (!/^[\w-]+\.(c|cc|cpp|cxx|ll|mlir|swift)$/i.test(name)) { alert("Use a source filename with letters, digits, hyphens or underscores."); return; }
     const path = `/workspace/${name}`;
     if (workspaceFiles(compiler.FS).includes(path)) { editWorkspaceFile(path); return; }
     compiler.FS.writeFile(path, "");
@@ -816,7 +928,12 @@ function wireUi() {
   elements.compile.addEventListener("click", compileSelectedOutput);
   elements.compileRun.addEventListener("click", compileAndRun);
   elements.loadWasm.addEventListener("click", loadExistingWasm);
-  elements.execute.addEventListener("click", executeSymbol);
+  elements.execute.addEventListener("click", async () => {
+    setBusy(true, 'Running WebAssembly…');
+    try { await executeSymbol(); setStatus('Compiler ready'); }
+    catch (error) { appendLog(error.message, 'err'); setStatus('Execution failed', 'error'); }
+    finally { setBusy(false); }
+  });
   elements.downloadFile.addEventListener("click", downloadWorkspaceFile);
   elements.fileSelect.addEventListener("change", () => openWorkspaceFile());
   elements.symbol.addEventListener("change", configureSelectedSymbol);
@@ -879,25 +996,38 @@ function wireUi() {
   updateLanguageUi();
 }
 
-async function loadCompiler() {
+async function loadCompiler(workspaceReady) {
   try {
-    setStatus("Downloading Clang and LLVM…", "loading");
-    const { default: createCompiler } = await import("../runtime/Compiler.js");
-    compiler = await createCompiler({
+    setStatus(swiftOnly ? "Loading Swift compiler and SDK…" : "Downloading Clang and LLVM…", "loading");
+    let loadedCompiler;
+    if (swiftOnly) {
+      loadedCompiler = { FS: createWorkspace() };
+      await prepareSwift();
+    } else {
+      const { default: createCompiler } = await import("../runtime/Compiler.js");
+      loadedCompiler = await createCompiler({
       locateFile: (path) => new URL(`../runtime/${path}`, import.meta.url).href,
       print: (line) => appendLog(line),
       printErr: (line) => appendLog(line, "err"),
       setStatus: (text) => { if (text) setStatus(text, "loading"); },
     });
+    }
+    await workspaceReady;
+    compiler = loadedCompiler;
     compiler.FS.mkdirTree("/workspace");
     compiler.FS.chdir("/workspace");
+    for (const [path, source] of workspaceSources) {
+      compiler.FS.mkdirTree(path.slice(0, path.lastIndexOf("/")));
+      compiler.FS.writeFile(path, source);
+    }
     writeSource();
 
-    const version = compiler.ccall("wasmbolt_version", "string", [], []);
-    const targets = compiler.ccall("available_targets", "string", [], []).split(",").filter(Boolean);
+    const version = swiftOnly ? "Swift 6.5-dev" : compiler.ccall("wasmbolt_version", "string", [], []);
+    runtimeVersion = version;
+    const targets = swiftOnly ? ['wasm32'] : compiler.ccall("available_targets", "string", [], []).split(",").filter(Boolean);
     const major = version.match(/LLVM (\d+)/)?.[1];
     if (major) resourceDir = `/lib/clang/${major}`;
-    const bits = compiler.ccall("wasmbolt_pointer_bits", "number", [], []);
+    const bits = swiftOnly ? 32 : compiler.ccall("wasmbolt_pointer_bits", "number", [], []);
     runtimeTriple = `wasm${bits}-unknown-emscripten`;
     document.body.dataset.runtimeArch = `wasm${bits}`;
     const wasmOption = elements.target.querySelector('option[value^="wasm"]');
@@ -908,13 +1038,13 @@ async function loadCompiler() {
     elements.version.textContent = `${version} · wasm${bits}`;
     elements.targets.textContent = `Backends: ${targets.join(", ")}`;
 
-    const support = {
+    targetSupport = {
       [runtimeTriple]: targets.some((name) => name.toLowerCase().includes("wasm")),
       "x86_64-unknown-linux-gnu": targets.some((name) => name.toLowerCase().includes("x86")),
       "aarch64-unknown-linux-gnu": targets.some((name) => name.toLowerCase().includes("aarch64")),
     };
     for (const option of elements.target.options) {
-      option.disabled = !support[option.value];
+      option.disabled = !targetSupport[option.value];
       if (option.disabled) option.textContent += " (backend not packaged)";
     }
     if (elements.target.selectedOptions[0]?.disabled)
@@ -923,7 +1053,7 @@ async function loadCompiler() {
     elements.log.textContent = "";
     setBusy(false);
     setStatus("Compiler ready");
-    installClangd({
+    if (!swiftOnly) installClangd({
       FS: compiler.FS,
       get resourceDir() { return resourceDir; },
       source: () => ({ path: languageSettings().filename, text: elements.source.value,
@@ -931,6 +1061,7 @@ async function loadCompiler() {
       files: () => workspaceFiles(compiler.FS),
       open: editWorkspaceFile,
     });
+    updateLanguageUi();
     const autorun = new URLSearchParams(location.search).get("autorun");
     if (autorun === "1" || autorun === "driver") {
       const settings = writeSource();
@@ -981,13 +1112,33 @@ if (startupParameters.get("autorun"))
   resetSource();
 else
   restoreState();
-if (["c", "cpp", "mlir", "llvm"].includes(requestedLanguage)) {
+if ([...elements.language.options].some(option => option.value === requestedLanguage && !option.disabled)) {
   elements.language.value = requestedLanguage;
   resetSource();
 }
+if (swiftOnly) { elements.language.value = 'swift'; resetSource(); }
 wireUi();
 switchTab("ir");
+writeSource();
+const workspaceReady = (async () => {
+  const loadedExamples = swiftEnabled ? await loadSwiftExamples() : {};
+  for (const [name, source] of Object.entries(loadedExamples)) {
+    const path = `/workspace/${name}`;
+    defaultSources.set(path, source);
+    if (!workspaceSources.has(path)) workspaceSources.set(path, source);
+  }
+  // Keep custom restored/typed code, but use the complete example for untouched defaults.
+  if (elements.source.value === (examples[elements.language.value] || ""))
+    elements.source.value = defaultSources.get(languageSettings().filename) ?? elements.source.value;
+  writeSource();
+  const example = startupParameters.get("example");
+  if (workspaceExampleNames.includes(example)) editWorkspaceFile(`/workspace/${example}`);
+  renderSourceGutter();
+})();
+// Attach a rejection handler while the large compiler download is in flight.
+workspaceReady.catch(error => appendLog(error.message, "err"));
+if (startupParameters.get("debugger") === "1") toggleDebugger(true);
 // Keep the document's load event pending until the asynchronous compiler
 // initialization (and an optional CI autorun) has completed. This gives
 // headless browsers a deterministic readiness boundary.
-await loadCompiler();
+await loadCompiler(workspaceReady);

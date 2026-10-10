@@ -46,6 +46,7 @@
         <span>Language</span>
         <select id="language">
           <option value="cpp">C++23</option>
+          <option value="swift" disabled>Swift</option>
           <option value="c">C23</option>
           <option value="mlir">MLIR</option>
           <option value="llvm">LLVM IR</option>
@@ -105,6 +106,7 @@
         <div class="pane-title output-title">
           <nav id="tabs" class="tabs" aria-label="Compiler output">
             <button data-tab="ast">AST</button>
+            <button data-tab="sil" class="hidden">SIL</button>
             <button data-tab="mlir">MLIR</button>
             <button data-tab="ir">LLVM IR</button>
             <button data-tab="optimized">Optimized IR</button>
