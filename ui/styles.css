@@ -167,3 +167,5 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .debugger-variable { font-family: var(--font-mono, monospace); font-size: 12px; padding: 5px 0; overflow-wrap: anywhere; }
 #debugger-frames button { display: block; width: 100%; padding: 6px; text-align: left; font-size: 12px; margin-bottom: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .debugger-notice { color: var(--muted); }
+.debugger-variable-children { padding-left: 14px; }
+summary.debugger-variable { cursor: pointer; }
