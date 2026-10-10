@@ -11,8 +11,10 @@ Swift exposes `Onone`, `O` and `Osize`. Assembly is WebAssembly assembler syntax
 its Wasm entry point. The terminal shows the same short `swiftc` commands you can run yourself.
 Generated `.sil`, `.ll`, `.s`, `.o` and `.wasm` files appear in Explorer;
 click a file to inspect or download it. The compiler/linker stay loaded.
-In the full WasmBolt build, CFG compiles Swift to LLVM IR, runs `opt` to produce
-DOT files and renders one with Graphviz. The Swift-only preview omits these tools.
+Select **CFG**, then **Compile**, to view LLVM control flow using the selected
+optimization. `opt` produces DOT files; Graphviz renders the first function as
+`cfg.svg`. Both the full build and Swift-only preview support this. To inspect
+another function, run `dot -Tsvg <file.dot> -o graph.svg` and open `graph.svg` in Explorer.
 
 ## Debug Fibonacci
 

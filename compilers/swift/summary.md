@@ -169,8 +169,10 @@ also cover new source files, terminal commands, output inspection, restart and
 Stop during startup. Compiler and LLDB Wasm each download once per page.
 Pause interrupts a running Swift loop; selecting the program frame exposes its
 global counter. Continue, a second Pause and Stop also pass.
-The full product renders Swift's LLVM CFG with the existing `opt`/Graphviz tools;
-the normal C/C++/LLVM IR output and tool-cache regression checks pass unchanged.
+Both the full product and Swift-only preview render Swift's LLVM CFG with the
+existing `opt`/Graphviz tools. Preview checks cover Fibonacci and FizzBuzz,
+source/optimization changes and one download per tool across repeated runs.
+The normal C/C++/LLVM IR output and tool-cache regression checks pass unchanged.
 The driver-backed preview additionally passes version/help, AST/SIL/IR/assembly,
 object linking, multi-file compilation, user response files, `-Xfrontend`/`-Xcc`/
 `-Xlinker`, dry-run/skip execution, invalid-option/source recovery and all three

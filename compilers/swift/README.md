@@ -102,8 +102,8 @@ Stage either the normal WasmBolt site with Swift added, or a Swift-only preview:
 # From the repository root, after building and packaging Swift:
 python3 compilers/swift/scripts/70-stage-site.py --base-site site --site build/swift-site
 python3 scripts/serve.py --site build/swift-site --port 8775
-# Dedicated demo; no Clang or LLVM utility binaries are needed:
-python3 compilers/swift/scripts/70-stage-site.py --swift-only --site build/swift-only
+# Dedicated demo; reuse only opt and Graphviz from the base site:
+python3 compilers/swift/scripts/70-stage-site.py --swift-only --base-site site --site build/swift-only
 python3 scripts/serve.py --site build/swift-only --port 8775
 ```
 

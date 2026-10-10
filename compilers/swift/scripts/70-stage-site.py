@@ -9,8 +9,8 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[3]
 recipe = root / 'compilers/swift'
 p = argparse.ArgumentParser(description=__doc__)
-p.add_argument('--base-site', type=Path,
-               help='Site produced by scripts/build.sh or the LLDB staging script')
+p.add_argument('--base-site', type=Path, required=True,
+               help='Built WasmBolt site; supplies opt and Graphviz for Swift-only sites')
 p.add_argument('--work', type=Path, default=Path(os.environ.get(
     'WASMBOLT_SWIFT_WORK_DIR', recipe / '.work')))
 p.add_argument('--site', type=Path, default=root / 'site')
@@ -26,8 +26,6 @@ if a.swift_only and (site / 'runtime/Compiler.js').exists():
 if a.base_site and not a.swift_only:
     shutil.copytree(a.base_site, site, dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns('*.gz', 'tests', 'wasm64'))
-elif not a.swift_only:
-    p.error('--base-site is required unless --swift-only is selected')
 
 def copy(source, destination):
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -75,16 +73,20 @@ for name in ['fibonacci.swift', 'fizzbuzz.swift', 'math.swift', 'main.swift']:
     json.dumps(examples) + '\n')
 copy(recipe / 'tutorial_swift.md', site / 'tutorial_swift.md')
 if a.swift_only:
+    for tool in ['opt', 'dot']:
+        for suffix in ['js', 'wasm']:
+            copy(a.base_site / 'tools' / f'{tool}.{suffix}',
+                 site / 'tools' / f'{tool}.{suffix}')
     html = (site / 'index.html').read_text()
     html = html.replace('<head>', '<head>\n    <meta name="wasmbolt-compiler" content="swift" />')
     import re
     html = re.sub(r'\s*<option value="(?:cpp|c|mlir|llvm|x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu)">.*?</option>', '', html)
-    html = re.sub(r'<button data-tab="(mlir|analysis|cfg)">',
+    html = re.sub(r'<button data-tab="(mlir|analysis)">',
                   r'<button class="hidden" data-tab="\1">', html)
     html = html.replace('Inspect, optimize, compile and run C, C++, MLIR and LLVM IR',
                         'Compile, run and debug Swift')
     html = html.replace('run clang, mlir-opt, mlir-translate, opt, llc, dot and wasm-ld',
-                        'run swift and swiftc')
+                        'run swift, swiftc, opt and dot')
     html = html.replace('MLIR, Clang, LLVM, LLD and generated code',
                         'Swift, LLVM, LLD, LLDB and generated code')
     (site / 'index.html').write_text(html)
