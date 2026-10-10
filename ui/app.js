@@ -35,7 +35,7 @@ const elements = {
   argBWrap: $("#arg-b-wrap"),
   execute: $("#execute"),
   command: $("#command"),
-  runCommand: $("#run-command"),
+  commandLine: $(".command-line"),
 };
 
 const outputs = {
@@ -102,9 +102,10 @@ function setStatus(text, state = "ready") {
 
 function setBusy(value, message = "Working…") {
   busy = value;
-  for (const button of [elements.compile, elements.compileRun, elements.loadWasm, elements.runCommand])
+  for (const button of [elements.compile, elements.compileRun, elements.loadWasm])
     button.disabled = value || !compiler ||
       (button === elements.compileRun && elements.language.value === "mlir");
+  elements.command.disabled = !compiler;
   elements.execute.disabled = value || !selectedSignature || !currentModulePath;
   $("#new-file").disabled = value || !compiler;
   $("#debugger-target").disabled = value || !compiler;
@@ -835,8 +836,9 @@ function wireUi() {
   $("#clear-log").addEventListener("click", () => { elements.log.textContent = ""; });
   $("#copy-output").addEventListener("click", () => navigator.clipboard.writeText(elements.output.textContent));
   $("#share").addEventListener("click", shareState);
-  elements.runCommand.addEventListener("click", async () => {
-    if (!elements.command.value.trim() || busy) return;
+  elements.commandLine.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!elements.command.value.trim() || busy || !compiler) return;
     const command = elements.command.value.trim();
     elements.command.value = "";
     setBusy(true, "Running command…");
@@ -864,9 +866,6 @@ function wireUi() {
       const terminal = $("#terminal-scroll");
       terminal.scrollTop = terminal.scrollHeight;
     }
-  });
-  elements.command.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") elements.runCommand.click();
   });
   window.addEventListener("keydown", (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
