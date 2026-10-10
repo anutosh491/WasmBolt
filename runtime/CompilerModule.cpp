@@ -42,6 +42,19 @@ std::vector<std::string> tokenize(llvm::StringRef Command) {
   return Result;
 }
 
+// Flags that can load arbitrary native code (compiler plugins) or otherwise
+// escape the intended clang/lld invocation. These must never be accepted
+// from an untrusted command string passed in from JavaScript.
+bool hasDisallowedArg(const std::vector<std::string> &Args) {
+  for (const std::string &Arg : Args) {
+    const llvm::StringRef A(Arg);
+    if (A == "-load" || A == "-plugin" || A == "-fplugin" || A == "-Xclang" ||
+        A.starts_with("-fplugin=") || A.starts_with("-plugin="))
+      return true;
+  }
+  return false;
+}
+
 std::unordered_map<std::string, void *> LoadedModules;
 
 void *loadSymbol(const char *ModulePath, const char *Symbol) {
@@ -78,6 +91,12 @@ extern "C" EMSCRIPTEN_KEEPALIVE int run_command(const char *Command) {
 
   llvm::outs() << "$ " << Command << '\n';
   llvm::outs().flush();
+
+  if (hasDisallowedArg(Args)) {
+    llvm::errs() << "disallowed argument: plugin/code loading flags are not "
+                     "permitted\n";
+    return 126;
+  }
 
   const llvm::StringRef Program = llvm::sys::path::filename(Args.front());
   if (Program == "clang" || Program == "clang++")
