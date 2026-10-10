@@ -1,4 +1,4 @@
-self.onmessage = async ({ data: { program, args, files } }) => {
+self.onmessage = async ({ data: { program, args, files, cacheModule, wasmModule } }) => {
   const { tools } = await import("./registry.js");
   const { workspaceFiles } = await import("./client.js");
   const stdout = [], stderr = [], original = new Map();
@@ -11,6 +11,20 @@ self.onmessage = async ({ data: { program, args, files } }) => {
       print: (line) => stdout.push(String(line)),
       printErr: (line) => stderr.push(String(line)),
     };
+    if (cacheModule) {
+      options.instantiateWasm = (imports, receive) => {
+        const result = wasmModule
+          ? WebAssembly.instantiate(wasmModule, imports).then(instance => ({ instance, module: wasmModule }))
+          : WebAssembly.instantiateStreaming(fetch(options.locateFile(`${tools[program]}.wasm`)), imports);
+        result.then(({ instance, module }) => {
+          wasmModule = module;
+          receive(instance, module);
+        }).catch(exception => {
+          self.postMessage({ status: 1, error: String(exception), stdout, stderr, files: [], deleted: [] });
+        });
+        return {};
+      };
+    }
     if (program === "dot") {
       // The published Graphviz CLI uses classic Emscripten JS. Its global
       // filesystem and entry point live only in this disposable Worker.
@@ -49,5 +63,5 @@ self.onmessage = async ({ data: { program, args, files } }) => {
     }
     for (const path of original.keys()) if (!paths.has(path)) deleted.push(path);
   }
-  self.postMessage({ status, error, stdout, stderr, files: generated, deleted }, generated.map((file) => file.data));
+  self.postMessage({ status, error, stdout, stderr, files: generated, deleted, wasmModule }, generated.map((file) => file.data));
 };

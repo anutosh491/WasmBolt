@@ -1,5 +1,8 @@
 import { tools, tokenize } from "./registry.js";
 
+const analysisTools = new Set(["opt", "llc", "mlir-opt", "dot"]);
+const compiledModules = new Map();
+
 export function workspaceFiles(FS, directory = "/workspace") {
   return FS.readdir(directory).filter((name) => name !== "." && name !== "..")
     .flatMap((name) => {
@@ -17,8 +20,8 @@ export function runTool(command, FS) {
   const program = args.shift().split("/").pop();
   const files = workspaceFiles(FS).map((path) => ({ path, data: FS.readFile(path).slice().buffer }));
   return new Promise((resolve, reject) => {
-    // LLVM tools may exit or shut down their global state. A fresh Worker makes
-    // repeated invocations independent while keeping all generated files.
+    // Retain compiled analysis code, but give CLI shutdown and globals a fresh
+    // instance for each command. Utility tools remain disposable.
     const worker = new Worker(new URL("./worker.js", import.meta.url));
     worker.onerror = (event) => {
       worker.terminate();
@@ -26,6 +29,7 @@ export function runTool(command, FS) {
     };
     worker.onmessage = ({ data }) => {
       worker.terminate();
+      if (data.wasmModule) compiledModules.set(program, data.wasmModule);
       for (const file of data.files) {
         FS.mkdirTree(file.path.slice(0, file.path.lastIndexOf("/")));
         FS.writeFile(file.path, new Uint8Array(file.data));
@@ -33,6 +37,8 @@ export function runTool(command, FS) {
       for (const path of data.deleted) FS.unlink(path);
       resolve(data);
     };
-    worker.postMessage({ program, args, files }, files.map((file) => file.data));
+    worker.postMessage({ program, args, files,
+      cacheModule: analysisTools.has(program), wasmModule: compiledModules.get(program),
+    }, files.map((file) => file.data));
   });
 }
