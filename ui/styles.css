@@ -109,7 +109,11 @@ footer { min-height: 26px; display: flex; justify-content: space-between; gap: 2
 .source-gutter button[aria-pressed="true"] { color: var(--text); background: #35212b; }
 .source-gutter button[aria-pressed="true"]::before { content: ""; position: absolute; left: 7px; top: 50%; transform: translateY(-50%); width: 7px; height: 7px; border-radius: 50%; background: var(--red); }
 .debugger-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
-.debugger-pane button:disabled, .debugger-pane input:disabled { cursor: not-allowed; }
+.debugger-pane button:disabled, .debugger-pane input:disabled, .debugger-pane select:disabled { cursor: not-allowed; }
+.debugger-target { display: grid; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.debugger-target label { color: var(--muted); font-size: 11px; font-weight: 650; }
+.debugger-target select { width: 100%; min-width: 0; font-size: 12px; }
+#debugger-program { margin: 0; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 #debugger-command { width: 100%; }
 
 /* Plain DOM panels; debugger visibility has no runtime/session side effects. */
