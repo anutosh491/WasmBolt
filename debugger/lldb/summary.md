@@ -36,6 +36,10 @@ Opening the panel preloads LLDB's compiled module into a page-level cache. Fresh
 process Workers reuse that code through `instantiateWasm`, including their
 pthreads. Hiding the panel, Stop and Restart preserve the cache; the browser
 acceptance check counts asset requests across all examples and restarts.
+The Variables panel expands LLDB's child references on demand, including nested
+structs and arrays. Stepping or changing frames discards the previous stop's
+children. C++ field updates, restart and exit are verified alongside the
+C/C++/LLVM IR examples; this UI change needs no new LLVM or WAMR patch.
 
 ## Validation and limits
 
