@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage Swift on top of the existing WasmBolt assets."""
+"""Stage Swift and its matching debugger on top of the existing WasmBolt assets."""
 import argparse
 import json
 import os
@@ -15,8 +15,9 @@ p.add_argument('--work', type=Path, default=Path(os.environ.get(
     'WASMBOLT_SWIFT_WORK_DIR', recipe / '.work')))
 p.add_argument('--site', type=Path, default=root / 'site')
 p.add_argument('--swift-only', action='store_true',
-               help='Stage only Swift compilation')
+               help='Stage only Swift compilation and debugging')
 a = p.parse_args()
+with_debugger = (root / 'debugger/lldb/worker.js').is_file()
 site = a.site.resolve()
 if site == root or site in root.parents or (a.base_site and site == a.base_site.resolve()):
     p.error('Choose a separate generated site directory')
@@ -33,8 +34,10 @@ def copy(source, destination):
 copy(root / 'ui/index.html', site / 'index.html')
 html = (site / 'index.html').read_text()
 html = html.replace('<option value="swift" disabled>', '<option value="swift">')
+if with_debugger:
+    html = html.replace('<head>', '<head>\n    <meta name="wasmbolt-debugger" content="lldb" />')
 (site / 'index.html').write_text(html)
-for directory in ['ui', 'runtime', 'tools', 'language-services/clangd', 'compilers/swift']:
+for directory in ['ui', 'runtime', 'tools', 'language-services/clangd', 'compilers/swift', 'debugger/lldb']:
     for source in (root / directory).glob('*.js'):
         copy(source, site / directory / source.name)
 for source in (root / 'language-services/clangd').glob('*.css'):
@@ -53,6 +56,13 @@ copy(a.work / 'swift-package/modules.tar.gz',
 with_foundation = (a.work / 'swift-package/foundation.tar.gz').is_file()
 if with_foundation:
     copy(a.work / 'swift-package/foundation.tar.gz', site / 'compilers/swift/foundation.tar.gz')
+if with_debugger:
+    for name in ['lldb-dap.js', 'lldb-dap.wasm', 'lldb-dap.worker.js']:
+        copy(a.work / 'output' / name, site / 'debugger/lldb' / name)
+examples = {} if a.swift_only or not with_debugger else {name: (root / 'debugger/lldb/tests' / name).read_text()
+            for name in ['simple.cpp', 'simple.c', 'debug.ll', 'json.cpp']}
+if with_debugger:
+    (site / 'debugger/lldb/workspace-examples.json').write_text(json.dumps(examples) + '\n')
 examples = {}
 for name in ['fibonacci.swift', 'fizzbuzz.swift', 'dates.swift', 'json.swift',
              'concurrency.swift', 'math.swift', 'main.swift']:
@@ -72,16 +82,16 @@ if a.swift_only:
     html = re.sub(r'<button data-tab="(mlir|analysis)">',
                   r'<button class="hidden" data-tab="\1">', html)
     html = html.replace('Inspect, optimize, compile and run C, C++, MLIR and LLVM IR',
-                        'Compile and run Swift')
+                        'Compile, run and debug Swift')
     html = html.replace('run clang, mlir-opt, mlir-translate, opt, llc, dot and wasm-ld',
                         'run swift, swiftc, opt and dot')
     html = html.replace('MLIR, Clang, LLVM, LLD and generated code',
-                        'Swift, LLVM, LLD and generated code')
+                        'Swift, LLVM, LLD, LLDB and generated code')
     (site / 'index.html').write_text(html)
 for path in ['compilers/swift/wasmbolt-swift.wasm',
              'compilers/swift/runtime.tar.gz', 'compilers/swift/modules.tar.gz',
              *(['compilers/swift/foundation.tar.gz'] if with_foundation else []),
-]:
+             *(['debugger/lldb/lldb-dap.wasm'] if with_debugger else [])]:
     (site / (path + '.parts.json')).write_text(json.dumps([Path(path).name]) + '\n')
 (site / '_headers').write_text('/*\n  Cross-Origin-Opener-Policy: same-origin\n'
     '  Cross-Origin-Embedder-Policy: require-corp\n'

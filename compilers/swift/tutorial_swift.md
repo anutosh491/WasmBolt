@@ -16,6 +16,27 @@ optimization. `opt` produces DOT files; Graphviz renders the first function as
 `cfg.svg`. Both the full build and Swift-only preview support this. To inspect
 another function, run `dot -Tsvg <file.dot> -o graph.svg` and open `graph.svg` in Explorer.
 
+## Debug Fibonacci
+
+1. Click the bug button and wait for **LLDB ready**. It downloads once per page.
+2. Set a breakpoint at line **7** (`let next = previous + current`). Leave
+   **Debug target** on **Build current source**, then click Start.
+3. Inspect `n = 10`, `index = 2`, `previous = 0`, `current = 1`.
+4. Step over to line **8**: `next = 1` is now available. Step through the
+   assignments and next iteration to watch the sequence grow.
+5. Remove the loop breakpoint before Step out. Step out stops back at line **16**.
+   Step over to line **17** to store `answer = 55`, then Continue to see stdout and exit code 0.
+6. Stop releases the debug process; Restart creates a new session. Hiding the
+   panel leaves the session intact. Pause is available only while running.
+
+**Build current source** uses `-Onone -gdwarf-types -dwarf-version=4`, independently
+of the output optimization selector. You can instead choose an existing `.wasm`
+under **Debug target**. The panel shows its path; Restart reuses the same program.
+Expand struct, array and enum rows in Variables to inspect their fields or
+elements. The debug console also accepts member reads such as `point.x` and
+`numbers[1]`. Evaluating new Swift code in the paused program, such as `n + 1`
+or a function call, requires Wasm JIT support that LLDB does not yet provide.
+
 ## Advanced terminal
 
 Use `swift` for version/help and `swiftc` for compilation. SDK paths and runtime
@@ -47,6 +68,19 @@ add supporting files and keep top-level executable code in `main.swift`.
 The standalone `fibonacci.swift` and `fizzbuzz.swift` examples each have their
 own top-level program; compile them separately.
 
+To debug both files, build full debug information:
+
+```sh
+swiftc -g math.swift main.swift -o multi-debug.wasm
+```
+
+Set a breakpoint at `main.swift:2`, open the debugger and choose
+`multi-debug.wasm` under **Debug target**, then click **Start**. **Step into** opens `math.swift` at
+line 2; **Step out** returns to `main.swift`. Step over to line 3 to inspect
+`answer = 6765`, then Continue. You can also set a breakpoint at `math.swift:7`
+and step over to line 8 to inspect `next = 1`; remove that loop breakpoint
+before Step out. Restart keeps the same selected binary.
+
 Click generated files in Explorer to inspect them. Select a `.wasm` file and
 **Load selected .wasm** to run it. `swiftc -### fibonacci.swift -o fibonacci.wasm`
 prints the underlying jobs. The upstream C++ driver parses advanced arguments,
@@ -57,13 +91,17 @@ not a shell; `swift file.swift` and SwiftPM are not implemented here.
 ## Foundation and concurrency
 
 `dates.swift` formats dates with ICU. Use **Compile & Run**, or
-`swiftc dates.swift -o dates.wasm`. It also prints the current time.
+`swiftc dates.swift -o dates.wasm`. Break at line **10** to inspect the start,
+end and `durationMinutes = 45`. It also prints the current time.
 
 `json.swift` uses `FoundationEssentials` to encode and decode a meeting with
-`Codable`. Compile each example separately.
+`Codable`. Break at line **13** to expand `decoded` and inspect its title and
+attendees. Compile each example separately.
 
 `concurrency.swift` uses an actor and a task group to sum squares, printing `55`.
-Tasks run cooperatively on one guest thread.
+Set a breakpoint at line **9** to inspect the result in `report`. Tasks run
+cooperatively on one guest thread. Async frame-local inspection is still limited;
+the example's synchronous helper and top-level values are inspectable.
 
 Foundation is included in the demo's compiler SDK, rather than built on each
 page load. FoundationNetworking and OS services such as spawning processes are

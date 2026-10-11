@@ -1,0 +1,45 @@
+diff --git a/lldb/source/Plugins/Language/Swift/SwiftFormatters.cpp b/lldb/source/Plugins/Language/Swift/SwiftFormatters.cpp
+index f62bbb1b7..245b4a98a 100644
+--- a/lldb/source/Plugins/Language/Swift/SwiftFormatters.cpp
++++ b/lldb/source/Plugins/Language/Swift/SwiftFormatters.cpp
+@@ -241,31 +241,18 @@ static bool makeStringGutsSummary(
+ 
+     llvm::StringRef variantCase = variant_sp->GetValueAsCString();
+ 
+-    ValueObjectSP payload_sp;
+-    if (variantCase == "immortal" || variantCase == "native" ||
+-        variantCase == "bridged") {
+-      payload_sp = variant_sp->GetSyntheticValue();
+-      if (!payload_sp)
+-        return error("unexpected layout (no variant)");
+-      payload_sp = payload_sp->GetChildAtIndex(0);
+-      if (!payload_sp)
+-        return error("unexpected layout (no variant payload)");
+-      payload_sp = payload_sp->GetSyntheticValue();
+-    } else {
++    if (variantCase != "immortal" && variantCase != "native" &&
++        variantCase != "bridged")
+       return error("unknown variant");
+-    }
+-    if (variantCase == "bridged") {
+-      if (!payload_sp)
+-        return error("unexpected layout (bridged)");
+-      payload_sp = payload_sp->GetChildAtIndex(0, true); // "instance"
+-    }
+-    if (!payload_sp)
+-      return error("no payload");
+-
+-    uint64_t pointerBits = payload_sp->GetValueAsUnsigned(LLDB_INVALID_ADDRESS);
+ 
+-    if (pointerBits == LLDB_INVALID_ADDRESS)
++    // All three cases store one pointer-sized payload. Read its bits from the
++    // enum itself; Builtin.NativeObject need not have a synthetic formatter.
++    lldb_private::DataExtractor variantData;
++    Status variantError;
++    if (variant_sp->GetData(variantData, variantError) < ptrSize)
+       return error("invalid payload");
++    lldb::offset_t offset = 0;
++    uint64_t pointerBits = variantData.GetMaxU64(&offset, ptrSize);
+ 
+     if ((discriminator & 0xB0) == 0xA0) {
+       raw0 = count | (pointerBits << 32);

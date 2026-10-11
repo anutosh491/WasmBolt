@@ -1,0 +1,26 @@
+diff --git a/core/iwasm/interpreter/wasm_runtime.c b/core/iwasm/interpreter/wasm_runtime.c
+--- a/core/iwasm/interpreter/wasm_runtime.c
++++ b/core/iwasm/interpreter/wasm_runtime.c
+@@ -1675,6 +1675,9 @@
+     /* Only execute the memory init function for main instance since
+        the data segments will be dropped once initialized */
+     if (!is_sub_inst
++        /* WASI commands initialize themselves through _start, including when
++           their imports are supplied by the embedding instead of libc-wasi. */
++        && !lookup_post_instantiate_func(module_inst, "_start")
+ #if WASM_ENABLE_LIBC_WASI != 0
+         && !module->import_wasi_api
+ #endif
+diff --git a/core/iwasm/aot/aot_runtime.c b/core/iwasm/aot/aot_runtime.c
+--- a/core/iwasm/aot/aot_runtime.c
++++ b/core/iwasm/aot/aot_runtime.c
+@@ -1752,6 +1752,9 @@
+     /* Only execute the memory init function for main instance since
+        the data segments will be dropped once initialized */
+     if (!is_sub_inst
++        /* WASI commands initialize themselves through _start, including when
++           their imports are supplied by the embedding instead of libc-wasi. */
++        && !lookup_post_instantiate_func(module_inst, "_start")
+ #if WASM_ENABLE_LIBC_WASI != 0
+         && !module->import_wasi_api
+ #endif

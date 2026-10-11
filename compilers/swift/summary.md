@@ -98,3 +98,42 @@ Warm local compile/link measured ~0.5 seconds for Fibonacci and ~1.3 seconds for
 JSON/Date; native measurements were two to three times faster. No native parity
 claim is made. SwiftPM, script interpretation, JavaScriptKit and SourceKit-LSP
 are deferred; compiler regex literals/macros remain outside validated scope.
+
+## Swift debugger layer
+
+This second layer adds matching Swift-aware LLDB and WAMR to the compiler layer.
+It uses Swift's LLVM fork, LLVM_ENABLE_THREADS=ON and pthreads, with LLDB pool 16.
+The independent guest remains single-threaded. Scripts 45--49 build/link LLDB;
+debugger/lldb owns the shared DAP bridge, WAMR classic interpreter, WASI imports,
+panel lifecycle and build instructions. No old workbench files are included.
+
+Opening the bug panel preloads compiled LLDB and the headers/modules SDK in
+parallel. Start builds full DWARF types at -Onone or uses an existing selected
+Wasm. Other workspace binaries are excluded from launch transfers. Restart
+retains the program, creates a fresh session and reuses compiled code/SDK bytes.
+Hiding the panel keeps the process. Pause is disabled after exit.
+
+Recorded patches include lldb-swift-browser.patch (embedded/threaded host,
+resource paths, synchronous browser source handling), lldb-swift-wasm-reflection
+(named swift5_* data segments and exact load-address symbol matching),
+swift-reflection-heap-layout (pointer-sized reference-count fields), and
+lldb-swift-wasm-strings (raw wasm32 String enum payload). LLDB reflection also
+uses -fno-optimize-sibling-calls for the observed aggregate-return issue.
+WAMR patches provide embedded debugging, WASI output/stop coordination and skip
+eager constructors for commands whose _start already runs them. These fixes
+are recorded as separate source changes and upstream candidates. No upstream
+submission was made by this task for the Swift/LLDB/WAMR findings.
+
+Browser checks cover Fibonacci scalar locals, nested structs/arrays/enums,
+Unicode strings, classes, dictionaries, Foundation Date and decoded JSON values.
+Multi-file math.swift/main.swift resolves breakpoints in both sources; Step into,
+Step out and frame selection switch files, next=1 and answer=6765 are inspected,
+and stdout/exit/Restart pass. Local Start-to-main measured ~1.7 seconds; Restart
+~1.4 seconds with tools loaded. The original delayed debugger gate also verifies
+attach/continue stop publication after idle intervals.
+
+Member/element reads such as point.x and numbers[1] work without target execution.
+Arbitrary paused-frame expressions/function calls remain unsupported because
+ProcessWasm disables JIT. Async suspended-frame locations remain limited; the
+concurrency demo exposes its result through a synchronous helper. SourceKit-LSP
+remains independent future work. This layer adds no REPL or REPL runtime.

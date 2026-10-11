@@ -1,7 +1,8 @@
 # Swift in WasmBolt
 
 Swift's driver, frontend and Wasm LLD run in one persistent compiler worker.
-`swiftc` produces AST, SIL, LLVM IR, assembly and linked Wasm. See [summary.md](summary.md) for
+`swiftc` produces AST, SIL, LLVM IR, assembly and linked Wasm.
+Swift-aware LLDB debugs the resulting programs. See [summary.md](summary.md) for
 source fixes and [tutorial_swift.md](tutorial_swift.md) for examples.
 
 ## Build
@@ -34,6 +35,19 @@ python3 scripts/50-package.py
 Compiler hosts use pthreads; guest programs use an independent wasm32 runtime
 with cooperative concurrency. Foundation loads on its first compiler import.
 
+Add the debugger using Swift's matching LLVM/LLDB fork:
+
+```sh
+bash scripts/45-configure-lldb.sh
+source scripts/common.sh
+"${PYTHON}" scripts/46-build-lldb-objects.py \
+  --ninja "${NINJA}" --build "${WORK_DIR}/lldb-wasm" --jobs 2
+bash scripts/47-build-lldb-libraries.sh
+(cd ../../debugger/lldb && bash scripts/10-fetch-wamr.sh && bash scripts/20-build-wamr.sh)
+bash scripts/48-build-debugger-bridge.sh
+bash scripts/49-link-debugger.sh
+```
+
 `WASMBOLT_SWIFT_WORK_DIR` selects ignored build output (default `.work`);
 `WASMBOLT_SWIFT_SOURCE_ROOT` and `WASMBOLT_SWIFT_LLVM_SOURCE` select pinned
 source directories. `WASMBOLT_SWIFT_JOBS` defaults to six. Lower it for limited
@@ -65,8 +79,9 @@ npx playwright install chromium
 node tests/prepare.mjs
 node tests/compiler.mjs
 node tests/compiler-browser.mjs
+node tests/compiler-browser.mjs debug
 ```
 
 Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` for system Chrome. The gates exercise
-compiler outputs and execution. Reports and
+compiler outputs, execution and debugger stepping. Reports and
 compiled guests stay in `.work/`.

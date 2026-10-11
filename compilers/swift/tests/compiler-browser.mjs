@@ -9,6 +9,7 @@ const project = resolve(import.meta.dirname, '..');
 const work = resolve(
   process.env.WASMBOLT_SWIFT_WORK_DIR ?? resolve(project, '.work')
 );
+const debuggerTest = process.argv[2] === 'debug';
 const server = createServer(async (request, response) => {
   for (const [name, value] of Object.entries({
     'Cross-Origin-Opener-Policy': 'same-origin',
@@ -45,6 +46,7 @@ const server = createServer(async (request, response) => {
     return;
   }
   const routes = [
+    ['/artifacts/', resolve(work, 'output')],
     ['/browser-guests/', resolve(work, 'browser-tests')],
     ['/compiler/', resolve(work, 'compiler')],
     ['/swift-package/', resolve(work, 'swift-package')],
@@ -81,10 +83,10 @@ try {
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
   page.on('console', event => console.log(event.text()));
   const result = await page.evaluate(
-    () =>
+    debuggerTest =>
       new Promise((resolve, reject) => {
         const worker = new Worker(
-          '/compiler-worker.mjs',
+          debuggerTest ? '/debugger-worker.mjs' : '/compiler-worker.mjs',
           { type: 'module' }
         );
         const timeout = setTimeout(() => {
@@ -92,9 +94,13 @@ try {
           reject(new Error('Swift compiler browser test timed out.'));
         }, 300000);
         worker.onmessage = event => {
+          if (debuggerTest && event.data.kind === 'log') {
+            console.log(JSON.stringify(event.data.value));
+            return;
+          }
           clearTimeout(timeout);
           worker.terminate();
-          resolve(event.data);
+          resolve(debuggerTest ? event.data.value : event.data);
         };
         worker.onerror = event => {
           clearTimeout(timeout);
@@ -102,17 +108,22 @@ try {
           reject(new Error(event.message));
         };
         worker.postMessage({});
-      })
+      }),
+    debuggerTest
   );
   await writeFile(
     resolve(
       work,
-      'compiler-browser-result.json'
+      debuggerTest
+        ? 'debugger-browser-result.json'
+        : 'compiler-browser-result.json'
     ),
     JSON.stringify(result, null, 2) + '\n'
   );
   assert.equal(result.success, true, result.message);
-
+  if (debuggerTest) {
+    process.stdout.write('Browser Swift debugger passed.\n');
+  } else {
     assert.equal(result.isolated, true);
     assert.deepEqual(
       result.results.map(value => value.code),
@@ -142,6 +153,7 @@ try {
       'Browser Swift/LLD re-entry, outputs, linking and source ' +
         'error recovery passed.\n'
     );
+  }
 } finally {
   await browser.close();
   await new Promise(resolve => server.close(resolve));
