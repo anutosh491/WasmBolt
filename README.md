@@ -9,6 +9,10 @@ Start with the [tutorials](tutorials.md) for MLIR, WebAssembly, LLVM utilities,
 x86-64 and AArch64.
 They walk through commands and inspecting generated files in the browser.
 
+Compiler and analysis modules stay available during the session. For Cloudflare
+Pages, `node scripts/package-pages.mjs site build/pages` packages compressed,
+content-hashed assets that the browser can cache across reloads.
+
 ```text
 C / C++ source -> resident Clang -> AST / LLVM IR / optimized IR / assembly
 LLVM IR -> resident Clang -> optimized IR / assembly
@@ -83,9 +87,10 @@ The linker does not infer binary libraries from included headers. A deployment
 can add any compatible Emscripten package and users can provide its normal link
 flags in their `wasm-ld` command, just as they would to a native linker.
 
-The compiler runtime loads first. Tool modules load on demand in disposable
-Workers and return their generated files to the shared browser workspace.
-Each command gets a fresh Worker to isolate tool shutdown and command-line state.
+The compiler runtime loads first. Tool modules load on demand and return files
+to the shared browser workspace. `opt`, `llc` and `mlir-opt` share an analysis
+Worker with fresh runtime instances per command. Graphviz and utilities use
+disposable Workers; analysis modules retain their compiled code for the session.
 
 Source lives in `ui/`, `compilers/clang/`, `linkers/wasm-ld/`, `runtime/` and
 `tools/`. `language-services/clangd/` runs the packaged language server in a

@@ -1,4 +1,5 @@
 // Persistent clangd process. Browser messages carry LSP and filesystem updates.
+import { compileWasm } from '../../runtime/load-wasm.js';
 const encoder = new TextEncoder(), decoder = new TextDecoder();
 const input = [];
 let offset = 0, wake = null, module = null, output = [], expected = null;
@@ -47,12 +48,22 @@ function write(files) {
   }
 }
 async function start(files) {
-  const factory = (await import('./runtime/clangd.js')).default;
-  module = await factory({
-    thisProgram: '/usr/bin/clangd',
-    locateFile: path => new URL(path, new URL('./runtime/', import.meta.url)).href,
-    stdin, stdinReady, stdout, stderr,
-    onAbort: reason => post('error', { message: `clangd aborted: ${reason}` }),
+  const [{ default: factory }, binary] = await Promise.all([
+    import('./runtime/clangd.js'),
+    compileWasm(new URL('./runtime/clangd.wasm', import.meta.url)),
+  ]);
+  module = await new Promise((resolve, reject) => {
+    factory({
+      instantiateWasm(imports, receive) {
+        WebAssembly.instantiate(binary, imports)
+          .then(instance => receive(instance, binary)).catch(reject);
+        return {};
+      },
+      thisProgram: '/usr/bin/clangd',
+      locateFile: path => new URL(path, new URL('./runtime/', import.meta.url)).href,
+      stdin, stdinReady, stdout, stderr,
+      onAbort: reason => post('error', { message: `clangd aborted: ${reason}` }),
+    }).then(resolve, reject);
   });
   write(files);
   module.FS.mkdirTree('/workspace');
