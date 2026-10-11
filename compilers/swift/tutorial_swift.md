@@ -107,3 +107,38 @@ Foundation is included in the demo's compiler SDK, rather than built on each
 page load. FoundationNetworking and OS services such as spawning processes are
 outside this browser build.
 
+## REPL
+
+Enter `swift repl` in the advanced terminal, then submit one line at a time.
+Bare `swift` shows available subcommands; the REPL prints its compiler version
+and numbered prompts:
+
+```swift
+var counter = 1
+counter += 1
+print(counter)
+print("Hello, 🌐!")
+func fib(_ n: Int) -> Int {
+  if n < 2 { return n }
+  return fib(n - 1) + fib(n - 2)
+}
+print(fib(10))
+```
+
+The prompt changes to `…>` for unfinished input. Definitions persist across
+cells; `print(counter)` prints `2`, and `print(fib(10))` prints `55`.
+`:reset` clears the session; `:quit` returns to tool commands.
+**Ctrl+C** in the terminal interrupts a running cell and clears the session.
+The REPL module downloads on first use and stays cached for the page.
+
+Foundation is available in the REPL too:
+
+```swift
+import Foundation
+print(Date(timeIntervalSince1970: 0).addingTimeInterval(60).timeIntervalSince1970)
+```
+
+This prints `60.0`. Date formatting and Codable JSON also work across cells.
+JavaScriptKit, macros and async REPL cells are not validated.
+See [README.md](README.md) for reproduction and [summary.md](summary.md) for
+source patches, threading and current limits.

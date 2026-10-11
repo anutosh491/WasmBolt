@@ -15,9 +15,9 @@ const destination = resolve(process.argv[3] || join(root, 'compilers/swift/.work
 // mirror excluding large binaries, without touching the source site.
 const mirror = join(root, 'compilers/swift/.work/pages-input');
 const binaries = ['compilers/swift/wasmbolt-swift.wasm'];
-const sdks = ['runtime.tar.gz', 'foundation.tar.gz', 'modules.tar.gz']
+const sdks = ['runtime.tar.gz', 'foundation.tar.gz', 'modules.tar.gz', 'repl-modules.tar.gz', 'repl-foundation.tar.gz']
   .map(name => 'compilers/swift/' + name);
-for (const optional of ['debugger/lldb/lldb-dap.wasm'])
+for (const optional of ['debugger/lldb/lldb-dap.wasm', 'compilers/swift/wasmbolt-swift-repl.wasm'])
   if (await stat(join(source, optional)).catch(() => null)) binaries.push(optional);
 await rm(mirror, { recursive: true, force: true });
 const { cp } = await import('node:fs/promises');

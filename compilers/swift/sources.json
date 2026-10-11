@@ -19,6 +19,10 @@
     "version": "6.0.8",
     "channel": "emscripten-forge-6x"
   },
+  "previousRepl": {
+    "revision": "701fac3e1f7c9b2879c89cc2e3de0ac32de10192",
+    "url": "https://github.com/anutosh491/swift/tree/emscripten-repl"
+  },
   "foundation": {
     "url": "https://github.com/swiftlang/swift-foundation.git",
     "revision": "a1c611f6ecc0164b5a489f23013e5c637e9e5cd1"

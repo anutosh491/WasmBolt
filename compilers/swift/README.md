@@ -1,8 +1,8 @@
 # Swift in WasmBolt
 
 Swift's driver, frontend and Wasm LLD run in one persistent compiler worker.
-`swiftc` produces AST, SIL, LLVM IR, assembly and linked Wasm.
-Swift-aware LLDB debugs the resulting programs. See [summary.md](summary.md) for
+`swiftc` produces AST, SIL, LLVM IR, assembly and linked Wasm. Optional layers
+add Swift-aware LLDB and an in-process REPL. See [summary.md](summary.md) for
 source fixes and [tutorial_swift.md](tutorial_swift.md) for examples.
 
 ## Build
@@ -32,8 +32,9 @@ bash scripts/40-build-compiler.sh
 python3 scripts/50-package.py
 ```
 
-Compiler hosts use pthreads; guest programs use an independent wasm32 runtime
-with cooperative concurrency. Foundation loads on its first compiler import.
+Compiler/LLDB hosts use pthreads; guest programs use an independent wasm32
+runtime with cooperative concurrency. Foundation loads on its first compiler
+import. The REPL loads only on `swift repl`.
 
 Add the debugger using Swift's matching LLVM/LLDB fork:
 
@@ -46,6 +47,15 @@ bash scripts/47-build-lldb-libraries.sh
 (cd ../../debugger/lldb && bash scripts/10-fetch-wamr.sh && bash scripts/20-build-wamr.sh)
 bash scripts/48-build-debugger-bridge.sh
 bash scripts/49-link-debugger.sh
+```
+
+The optional REPL reuses compiler libraries in a separate build:
+
+```sh
+bash scripts/60-build-repl.sh
+# Optional Foundation for the REPL's threaded host:
+bash scripts/41-build-foundation.sh host
+bash scripts/61-build-repl-foundation.sh
 ```
 
 `WASMBOLT_SWIFT_WORK_DIR` selects ignored build output (default `.work`);
@@ -80,8 +90,9 @@ node tests/prepare.mjs
 node tests/compiler.mjs
 node tests/compiler-browser.mjs
 node tests/compiler-browser.mjs debug
+node tests/compiler-browser.mjs repl-foundation
 ```
 
 Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` for system Chrome. The gates exercise
-compiler outputs, execution and debugger stepping. Reports and
+compiler outputs, execution, debugger stepping and REPL recovery. Reports and
 compiled guests stay in `.work/`.

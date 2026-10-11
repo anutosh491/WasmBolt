@@ -56,6 +56,19 @@ copy(a.work / 'swift-package/modules.tar.gz',
 with_foundation = (a.work / 'swift-package/foundation.tar.gz').is_file()
 if with_foundation:
     copy(a.work / 'swift-package/foundation.tar.gz', site / 'compilers/swift/foundation.tar.gz')
+with_repl = (a.work / 'repl/output/wasmbolt-swift-repl.wasm').is_file()
+if with_repl:
+    copy(a.work / 'swift-package/repl-modules.tar.gz',
+         site / 'compilers/swift/repl-modules.tar.gz')
+    for suffix in ['js', 'wasm']:
+        copy(a.work / 'repl/output' / f'wasmbolt-swift-repl.{suffix}',
+             site / 'compilers/swift' / f'wasmbolt-swift-repl.{suffix}')
+    html = (site / 'index.html').read_text()
+    html = html.replace('<head>', '<head>\n    <meta name="wasmbolt-swift-repl" content="enabled" />')
+    (site / 'index.html').write_text(html)
+    foundation = a.work / 'repl/repl-foundation.tar.gz'
+    if foundation.is_file():
+        copy(foundation, site / 'compilers/swift/repl-foundation.tar.gz')
 if with_debugger:
     for name in ['lldb-dap.js', 'lldb-dap.wasm', 'lldb-dap.worker.js']:
         copy(a.work / 'output' / name, site / 'debugger/lldb' / name)
@@ -91,7 +104,10 @@ if a.swift_only:
 for path in ['compilers/swift/wasmbolt-swift.wasm',
              'compilers/swift/runtime.tar.gz', 'compilers/swift/modules.tar.gz',
              *(['compilers/swift/foundation.tar.gz'] if with_foundation else []),
-             *(['debugger/lldb/lldb-dap.wasm'] if with_debugger else [])]:
+             *(['compilers/swift/repl-foundation.tar.gz'] if with_repl and foundation.is_file() else []),
+             *(['compilers/swift/repl-modules.tar.gz'] if with_repl else []),
+             *(['debugger/lldb/lldb-dap.wasm'] if with_debugger else []),
+             *(['compilers/swift/wasmbolt-swift-repl.wasm'] if with_repl else [])]:
     (site / (path + '.parts.json')).write_text(json.dumps([Path(path).name]) + '\n')
 (site / '_headers').write_text('/*\n  Cross-Origin-Opener-Policy: same-origin\n'
     '  Cross-Origin-Embedder-Policy: require-corp\n'

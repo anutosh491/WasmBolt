@@ -2,7 +2,14 @@
 set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
 
-foundation="${WASMBOLT_FOUNDATION_WORK_DIR:-${WORK_DIR}/foundation}"
+mode="${1:-guest}"
+case "${mode}" in
+  guest) runtime=stdlib-wasm; name=foundation; c_flags=-fPIC; swift_extra='' ;;
+  host) runtime=stdlib-host-wasm; name=foundation-host
+    c_flags='-fPIC -pthread'; swift_extra='-Xcc -pthread' ;;
+  *) printf 'Expected guest or host, got %s\n' "${mode}" >&2; exit 1 ;;
+esac
+foundation="${WASMBOLT_FOUNDATION_WORK_DIR:-${WORK_DIR}/${name}}"
 sources="${WASMBOLT_FOUNDATION_SOURCE_DIR:-${foundation}/foundation-sources}"
 prefix="${foundation}/foundation-install"
 mkdir -p "${sources}" "${foundation}/foundation-no-plugins"
@@ -41,14 +48,14 @@ PY
 wasm_cmake -S "${sources}/libxml2" -B "${foundation}/libxml-wasm" -G Ninja \
   -DCMAKE_MAKE_PROGRAM="${NINJA}" -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="${prefix}" -DBUILD_SHARED_LIBS=OFF \
-  -DCMAKE_C_FLAGS="-fPIC" -DLIBXML2_WITH_THREADS=OFF \
+  -DCMAKE_C_FLAGS="${c_flags}" -DLIBXML2_WITH_THREADS=OFF \
   -DLIBXML2_WITH_LZMA=OFF -DLIBXML2_WITH_ZLIB=OFF -DLIBXML2_WITH_ICONV=OFF \
   -DLIBXML2_WITH_HTTP=OFF -DLIBXML2_WITH_MODULES=OFF \
   -DLIBXML2_WITH_TESTS=OFF -DLIBXML2_WITH_PROGRAMS=OFF -DLIBXML2_WITH_PYTHON=OFF
 "${CMAKE}" --build "${foundation}/libxml-wasm" --parallel "${JOBS}" --target install
 
 sdk="${EM_CACHE}/sysroot"
-flags="-target wasm32-unknown-emscripten -module-cache-path ${foundation}/foundation-module-cache -sdk ${sdk} -resource-dir ${WORK_DIR}/stdlib-wasm/lib/swift -Xcc -resource-dir=${WASM_LLVM_DIR}/lib/clang/23 -Xcc -isystem -Xcc ${sdk}/include/compat -Xcc -fPIC -Xcc -mno-reference-types "
+flags="-target wasm32-unknown-emscripten -module-cache-path ${foundation}/foundation-module-cache -sdk ${sdk} -resource-dir ${WORK_DIR}/${runtime}/lib/swift -Xcc -resource-dir=${WASM_LLVM_DIR}/lib/clang/23 -Xcc -isystem -Xcc ${sdk}/include/compat -Xcc -fPIC -Xcc -mno-reference-types ${swift_extra}"
 build="${foundation}/foundation-wasm"
 # Corelibs' existing FetchContent hooks build Essentials, Internationalization,
 # ICU and Collections once, from the matching sources above.
@@ -61,7 +68,7 @@ wasm_cmake -S "${sources}/swift-corelibs-foundation" -B "${build}" -G Ninja \
   -DCMAKE_Swift_COMPILER_WORKS=TRUE -DCMAKE_Swift_COMPILER_FORCED=TRUE \
   -DCMAKE_Swift_FLAGS="${flags}" \
   '-DCMAKE_Swift_CREATE_STATIC_LIBRARY=<CMAKE_AR> crs <TARGET> <OBJECTS>' \
-  -DCMAKE_C_FLAGS="-fPIC" -DCMAKE_CXX_FLAGS="-fPIC" \
+  -DCMAKE_C_FLAGS="${c_flags}" -DCMAKE_CXX_FLAGS="${c_flags}" \
   -D_SwiftFoundation_SourceDIR="${sources}/swift-foundation" \
   -D_SwiftFoundationICU_SourceDIR="${sources}/swift-foundation-icu" \
   -D_SwiftCollections_SourceDIR="${sources}/swift-collections" \
@@ -70,7 +77,7 @@ wasm_cmake -S "${sources}/swift-corelibs-foundation" -B "${build}" -G Ninja \
   -DLIBXML2_INCLUDE_DIR="${prefix}/include/libxml2"
 "${CMAKE}" --build "${build}" --parallel "${JOBS}" --target Foundation
 
-"${PYTHON}" - "${build}" "${WORK_DIR}/foundation-sdk" "${prefix}" <<'PY'
+"${PYTHON}" - "${build}" "${WORK_DIR}/${name}-sdk" "${prefix}" <<'PY'
 import pathlib, shutil, sys
 build, sdk, prefix = map(pathlib.Path, sys.argv[1:])
 runtime = sdk / 'lib/swift'

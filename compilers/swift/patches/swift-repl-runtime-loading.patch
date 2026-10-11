@@ -1,0 +1,25 @@
+diff --git a/lib/Immediate/Immediate.cpp b/lib/Immediate/Immediate.cpp
+--- a/lib/Immediate/Immediate.cpp
++++ b/lib/Immediate/Immediate.cpp
+@@ -38,6 +38,7 @@
+ #include "llvm/ADT/SmallString.h"
+ #include "llvm/Config/config.h"
++#include "llvm/Support/FileSystem.h"
+ #include "llvm/IR/LLVMContext.h"
+ #include "llvm/Support/Path.h"
+ 
+ #include <iostream>
+@@ -63,6 +64,13 @@
+ static void *loadRuntimeLib(StringRef runtimeLibPathWithName) {
+ #if defined(_WIN32)
+   return LoadLibraryA(runtimeLibPathWithName.str().c_str());
++#elif defined(__EMSCRIPTEN__)
++  // Resolve aliases before loading: one Wasm image may provide several libraries.
++  // Missing paths must not create incomplete entries in Emscripten's loader.
++  llvm::SmallString<128> path;
++  if (llvm::sys::fs::real_path(runtimeLibPathWithName, path))
++    return nullptr;
++  return dlopen(path.c_str(), RTLD_LAZY | RTLD_GLOBAL);
+ #else
+   return dlopen(runtimeLibPathWithName.str().c_str(), RTLD_LAZY | RTLD_GLOBAL);
+ #endif

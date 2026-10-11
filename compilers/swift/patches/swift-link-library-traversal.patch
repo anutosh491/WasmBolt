@@ -1,0 +1,52 @@
+diff --git a/lib/AST/Module.cpp b/lib/AST/Module.cpp
+--- a/lib/AST/Module.cpp
++++ b/lib/AST/Module.cpp
+@@ -2173,21 +2173,24 @@
+ }
+ 
+ void ModuleDecl::collectLinkLibraries(LinkLibraryCallback callback) const {
+-  bool hasSourceFile = false;
+-
+-  for (auto *file : getFiles()) {
+-    if (isa<SourceFile>(file)) {
+-      hasSourceFile = true;
+-    } else {
+-      file->collectLinkLibraries(callback);
+-    }
+-
+-    if (auto *synth = file->getSynthesizedFile()) {
+-      synth->collectLinkLibraries(callback);
+-    }
+-  }
+-
+-  if (!hasSourceFile)
++  auto collectLocalLibraries = [&](const ModuleDecl *module) {
++    bool hasSourceFile = false;
++
++    for (auto *file : module->getFiles()) {
++      if (isa<SourceFile>(file)) {
++        hasSourceFile = true;
++      } else {
++        file->collectLinkLibraries(callback);
++      }
++
++      if (auto *synth = file->getSynthesizedFile()) {
++        synth->collectLinkLibraries(callback);
++      }
++    }
++    return hasSourceFile;
++  };
++
++  if (!collectLocalLibraries(this))
+     return;
+ 
+   llvm::SmallDenseSet<ModuleDecl *, 32> visited;
+@@ -2214,7 +2217,7 @@
+       continue;
+ 
+     if (next->getName() != getName()) {
+-      next->collectLinkLibraries(callback);
++      collectLocalLibraries(next);
+     }
+ 
+     next->getImportedModules(stack, filter);

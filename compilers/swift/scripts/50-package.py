@@ -23,6 +23,7 @@ if args.sysroot is None:
 if args.foundation_sdk is None and (work / 'foundation-sdk').is_dir():
     args.foundation_sdk = work / 'foundation-sdk'
 runtime = work / 'stdlib-wasm/lib/swift'
+host_runtime = work / 'stdlib-host-wasm/lib/swift'
 clang = work / 'llvm-wasm/lib/clang/23/include'
 headers = args.sysroot / 'include'
 if not (runtime / 'emscripten/wasm32/libswiftCore.a').is_file():
@@ -45,6 +46,8 @@ with contextlib.ExitStack() as stack:
     names = ['runtime.tar.gz', 'modules.tar.gz']
     if args.foundation_sdk:
         names.append('foundation.tar.gz')
+    if host_runtime.is_dir():
+        names.append('repl-modules.tar.gz')
     for name in names:
         raw = stack.enter_context((package / name).open('wb'))
         compressed = stack.enter_context(gzip.GzipFile(fileobj=raw, mode='wb', mtime=0))
@@ -92,6 +95,15 @@ with contextlib.ExitStack() as stack:
         add_file(archives[target], source, name)
         if source.suffix not in ['.a', '.o']:
             add_file(archives['modules.tar.gz'], source, name)
+            if 'repl-modules.tar.gz' in archives:
+                relative = name.removeprefix('swift/lib/swift/')
+                host_source = host_runtime / relative
+                add_file(archives['repl-modules.tar.gz'], host_source if host_source.is_file() else source, name)
+    if 'repl-modules.tar.gz' in archives:
+        for source in sorted(host_runtime.rglob('*')):
+            name = f'swift/lib/swift/{source.relative_to(host_runtime)}'
+            if source.is_file() and source.suffix not in ['.a', '.o'] and name not in entries:
+                add_file(archives['repl-modules.tar.gz'], source, name)
     add_file(archives['runtime.tar.gz'], project / 'sdk/wasmbolt.cfg', 'swift/etc/wasmbolt.cfg')
     add_file(archives['runtime.tar.gz'], project / 'sdk/static-executable-args.lnk',
              'swift/lib/swift/emscripten/static-executable-args.lnk')
