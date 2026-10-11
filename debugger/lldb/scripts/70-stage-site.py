@@ -26,7 +26,7 @@ def copy(source, target):
     shutil.copy2(source, target)
 
 copy(root / 'ui/index.html', site / 'index.html')
-for directory, patterns in [('ui', ['*.js', '*.css']), ('runtime', ['exports.js']), ('tools', ['*.js'])]:
+for directory, patterns in [('ui', ['*.js', '*.css']), ('runtime', ['exports.js', 'load-wasm.js']), ('tools', ['*.js'])]:
     for pattern in patterns:
         for source in (root / directory).glob(pattern):
             copy(source, site / directory / source.name)

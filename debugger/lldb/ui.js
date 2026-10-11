@@ -1,5 +1,6 @@
 import { DebuggerClient, preloadDebugger } from './client.js';
 import { updateDebuggerTarget } from '../../ui/debugger-target.js';
+import { downloadWasm } from '../../runtime/load-wasm.js';
 
 const $ = selector => document.querySelector(selector);
 const libraries = ['standalonewasm-nocatch', 'stubs-debug', 'c-debug', 'dlmalloc-debug',
@@ -151,10 +152,15 @@ export async function installDebugger(host) {
         return response.json();
       });
       await Promise.all(manifest.map(async ({ path, url }) => {
-        const response = await fetch(new URL(url, import.meta.url));
-        if (!response.ok) throw new Error(`Guest file download failed: ${path}`);
+        let bytes;
+        if (path.endsWith('.a')) bytes = await downloadWasm(new URL(url, import.meta.url));
+        else {
+          const response = await fetch(new URL(url, import.meta.url));
+          if (!response.ok) throw new Error(`Guest file download failed: ${path}`);
+          bytes = await response.arrayBuffer();
+        }
         host.FS.mkdirTree(path.slice(0, path.lastIndexOf('/')));
-        host.FS.writeFile(path, new Uint8Array(await response.arrayBuffer()));
+        host.FS.writeFile(path, new Uint8Array(bytes));
       }));
     })().catch(error => { installing = null; throw error; });
     await installing;

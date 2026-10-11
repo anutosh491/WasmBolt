@@ -1,13 +1,10 @@
 // Keep compiled code for the page lifetime, independently of debug processes.
+import { compileWasm } from '../../runtime/load-wasm.js';
 let compiledModule = null;
 export function preloadDebugger() {
   return compiledModule ||= Promise.all([
     import('./lldb-dap.js'),
-    (async () => {
-      const response = await fetch(new URL('./lldb-dap.wasm', import.meta.url));
-      if (!response.ok) throw new Error(`LLDB download failed (${response.status})`);
-      return WebAssembly.compileStreaming(response);
-    })(),
+    compileWasm(new URL('./lldb-dap.wasm', import.meta.url)),
   ]).then(([, module]) => module).catch(error => {
     compiledModule = null;
     throw error;

@@ -187,8 +187,10 @@ npx wrangler@4.149.0 pages deploy debugger/lldb/.work/pages \
   --project-name wasmbolt-lldb-demo --branch main --commit-dirty=true
 ```
 
-The separate upload tree Brotli-compresses Wasm, data and archives at unchanged
-URLs, with `Content-Encoding: br`. Browsers decode them automatically. The script
+The separate upload tree Brotli-compresses Wasm, data and archives with
+`Content-Encoding: br`. Content-hashed payload URLs and small manifests let the
+shared loader retain bytes across reloads without mixing deployments. Browsers
+decode Brotli automatically. The script
 rejects files above Pages' 25 MiB asset limit; this deployment is about 104 MiB,
 with its largest asset about 22 MiB. Builds and the ordinary local site remain
 unchanged. Wrangler's local Pages preview can double-compress large assets;
@@ -199,3 +201,8 @@ The branch is based on main after the resident-Clang pipeline, compiled-tool
 cache and shared Debug target selector. Source builds and existing workspace
 Wasm modules use the same picker. Restart retains the launched program and
 source snapshot even when stepping changes the active editor.
+
+Shared compiler/tool loading and CFG transfer improvements come from main
+(`782a4b8`). This branch adds the LLDB loader and guest-library adapters.
+See [benchmarks.md](benchmarks.md) for measured first-use, cached-reload and
+warm-session timings.
