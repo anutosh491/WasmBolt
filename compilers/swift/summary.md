@@ -431,11 +431,9 @@ bundle excludes duplicate standard-library modules already in its base SDK.
 Chrome did not retain the large payloads in its automatic HTTP cache despite
 immutable headers. The loader therefore caches hashed payloads in CacheStorage,
 removes superseded parts of the same payload, and falls back to downloads if
-storage is unavailable. A fresh browser still needs its first download. One
-public Chrome run measured compiler readiness at 18 seconds cold and 1.5 seconds
-after reload; REPL startup was 16 seconds cold and 2.8 seconds after reload;
-Foundation import was 8.5 seconds cold and 2.5 seconds cached. These are
-end-to-end observations on this connection, not guaranteed visitor timings.
+storage is unavailable. A fresh browser still needs its first download.
+[Demo benchmarks](benchmarks.md) record first-use, same-page and cached-reload
+timings, including Date compilation/execution, CFG, LLDB and REPL startup.
 
 Extraction into the real Emscripten FS measured 123 ms for the core SDK and
 31 ms for REPL Foundation. Host initialization, including its pthread pool,
