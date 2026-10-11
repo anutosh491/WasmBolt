@@ -1038,25 +1038,25 @@ async function loadCompiler(workspaceReady) {
       loadedCompiler = { FS: createWorkspace() };
       await prepareSwift();
     } else {
-    const [{ default: createCompiler }, wasmModule, runtimeData] = await Promise.all([
-      import("../runtime/Compiler.js"),
-      compileWasm(new URL("../runtime/Compiler.wasm", import.meta.url)),
-      downloadWasm(new URL("../runtime/Compiler.data", import.meta.url)),
-    ]);
-    loadedCompiler = await new Promise((resolve, reject) => {
-      createCompiler({
-        getPreloadedPackage: () => runtimeData,
-        instantiateWasm(imports, receive) {
-          WebAssembly.instantiate(wasmModule, imports)
-            .then(instance => receive(instance, wasmModule)).catch(reject);
-          return {};
-        },
-        locateFile: (path) => new URL(`../runtime/${path}`, import.meta.url).href,
-        print: (line) => appendLog(line),
-        printErr: (line) => appendLog(line, "err"),
-        setStatus: (text) => { if (text) setStatus(text, "loading"); },
-      }).then(resolve, reject);
-    });
+      const [{ default: createCompiler }, wasmModule, runtimeData] = await Promise.all([
+        import("../runtime/Compiler.js"),
+        compileWasm(new URL("../runtime/Compiler.wasm", import.meta.url)),
+        downloadWasm(new URL("../runtime/Compiler.data", import.meta.url)),
+      ]);
+      loadedCompiler = await new Promise((resolve, reject) => {
+        createCompiler({
+          getPreloadedPackage: () => runtimeData,
+          instantiateWasm(imports, receive) {
+            WebAssembly.instantiate(wasmModule, imports)
+              .then(instance => receive(instance, wasmModule)).catch(reject);
+            return {};
+          },
+          locateFile: (path) => new URL(`../runtime/${path}`, import.meta.url).href,
+          print: (line) => appendLog(line),
+          printErr: (line) => appendLog(line, "err"),
+          setStatus: (text) => { if (text) setStatus(text, "loading"); },
+        }).then(resolve, reject);
+      });
     }
     await workspaceReady;
     compiler = loadedCompiler;

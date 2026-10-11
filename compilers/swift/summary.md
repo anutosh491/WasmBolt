@@ -1,8 +1,9 @@
 # Swift browser build summary
 
 Swift compilation and Swift-aware LLDB use the preserved build from 2026-10-04.
-This branch is based on structured WasmBolt main `372acf6` (2026-10-10), including
-resident Clang outputs, cached analysis modules and the shared Debug target picker and optional clangd. It extends that UI directly;
+This branch is based on structured WasmBolt main `782a4b8` (2026-10-11), including
+resident Clang outputs, shared asset caching, cached analysis modules, the Debug
+target picker and optional clangd. It extends that UI directly;
 no workbench, Jupyter/Lumino application or old dependency tree is imported.
 
 Keep three reviewable layers: Swift compiler integration, matching Swift

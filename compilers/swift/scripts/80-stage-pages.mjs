@@ -60,11 +60,5 @@ for (const sdk of sdks) {
     await compressParts(sdk, gunzipSync(await readFile(join(source, sdk))));
 }
 for (const path of binaries) await compressParts(path, await readFile(join(source, path)));
-for (const tool of ['opt', 'dot']) {
-  const path = `tools/${tool}.wasm`;
-  if (await stat(join(destination, path)).catch(() => null))
-    await writeFile(join(destination, `${path}.parts.json`),
-      JSON.stringify([await publishPayload(path, 'br')]) + '\n');
-}
 await writeFile(join(destination, '_headers'), headers);
 console.log('Swift Pages assets:', destination);
