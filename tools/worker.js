@@ -1,8 +1,10 @@
-self.onmessage = async ({ data: { program, args, files, cacheModule, wasmModule } }) => {
+let queue = Promise.resolve();
+self.onmessage = ({ data }) => { queue = queue.then(() => runToolJob(data)); };
+async function runToolJob({ id, program, args, files, cacheModule, wasmModule }) {
   const { tools } = await import("./registry.js");
   const { workspaceFiles } = await import("./client.js");
   const stdout = [], stderr = [], original = new Map();
-  let module, status = 0, error = "";
+  let module, rejectInstantiation, status = 0, error = "";
   try {
     const options = {
       noInitialRun: true,
@@ -11,24 +13,18 @@ self.onmessage = async ({ data: { program, args, files, cacheModule, wasmModule 
       print: (line) => stdout.push(String(line)),
       printErr: (line) => stderr.push(String(line)),
     };
-    if (cacheModule) {
-      options.instantiateWasm = (imports, receive) => {
-        const result = wasmModule
-          ? WebAssembly.instantiate(wasmModule, imports).then(instance => ({ instance, module: wasmModule }))
-          : WebAssembly.instantiateStreaming(fetch(options.locateFile(`${tools[program]}.wasm`)), imports);
-        result.then(({ instance, module }) => {
-          wasmModule = module;
-          receive(instance, module);
-        }).catch(exception => {
-          self.postMessage({ status: 1, error: String(exception), stdout, stderr, files: [], deleted: [] });
-        });
-        return {};
-      };
-    }
+    const { compileWasm } = await import("../runtime/load-wasm.js");
+    wasmModule ||= await compileWasm(new URL(`./${tools[program]}.wasm`, self.location.href));
+    options.instantiateWasm = (imports, receive) => {
+      WebAssembly.instantiate(wasmModule, imports)
+        .then(instance => receive(instance, wasmModule)).catch(error => rejectInstantiation(error));
+      return {};
+    };
     if (program === "dot") {
       // The published Graphviz CLI uses classic Emscripten JS. Its global
-      // filesystem and entry point live only in this disposable Worker.
+      // filesystem and entry point are replaced for each CLI invocation.
       module = await new Promise((resolve, reject) => {
+        rejectInstantiation = reject;
         self.Module = { ...options,
           onRuntimeInitialized: () => resolve({ FS: self.FS, callMain: self.callMain }),
           onAbort: (reason) => reject(new Error(String(reason))),
@@ -37,7 +33,10 @@ self.onmessage = async ({ data: { program, args, files, cacheModule, wasmModule 
       });
     } else {
       const { default: createTool } = await import(`./${tools[program]}.js`);
-      module = await createTool(options);
+      module = await new Promise((resolve, reject) => {
+        rejectInstantiation = reject;
+        createTool(options).then(resolve, reject);
+      });
     }
     module.FS.mkdirTree("/workspace");
     for (const file of files) {
@@ -63,5 +62,5 @@ self.onmessage = async ({ data: { program, args, files, cacheModule, wasmModule 
     }
     for (const path of original.keys()) if (!paths.has(path)) deleted.push(path);
   }
-  self.postMessage({ status, error, stdout, stderr, files: generated, deleted, wasmModule }, generated.map((file) => file.data));
-};
+  self.postMessage({ id, status, error, stdout, stderr, files: generated, deleted, wasmModule: cacheModule ? wasmModule : undefined }, generated.map((file) => file.data));
+}

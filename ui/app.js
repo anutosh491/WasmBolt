@@ -2,7 +2,8 @@ import { updateDebuggerTarget } from "./debugger-target.js";
 import { installClangd } from "../language-services/clangd/ui.js";
 import { examples } from "./examples.js";
 import { publicFunctionExports, displayFunctionExport, parseWasmFunctionSignatures } from "../runtime/exports.js";
-import { runTool, isToolCommand, workspaceFiles } from "../tools/client.js";
+import { runTool, isToolCommand, workspaceFiles, prepareTool } from "../tools/client.js";
+import { compileWasm, downloadWasm } from "../runtime/load-wasm.js";
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -175,7 +176,8 @@ async function renderCfg() {
     if (path.endsWith(".dot") || path === "/workspace/cfg.svg")
       removeIfPresent(path);
   }
-  await run("opt -passes=dot-cfg -disable-output /workspace/optimized.ll");
+  await run("opt -passes=dot-cfg -disable-output /workspace/optimized.ll",
+    { inputs: ["/workspace/optimized.ll"] });
   const dotPath = workspaceFiles(compiler.FS).find((path) => path.endsWith(".dot"));
   if (!dotPath) throw new Error("opt did not emit a CFG DOT file");
   await renderDot(dotPath, "/workspace/cfg.svg", `LLVM CFG from ${dotPath}`);
@@ -185,13 +187,13 @@ async function renderMlirCfg() {
   const dotPath = "/workspace/mlir-cfg.dot";
   removeIfPresent(dotPath);
   await run("mlir-opt --view-op-graph='print-data-flow-edges=false print-control-flow-edges=true' /workspace/optimized.mlir -o /dev/null",
-    { stderr: dotPath });
+    { stderr: dotPath, inputs: ["/workspace/optimized.mlir"] });
   await renderDot(dotPath, "/workspace/mlir-cfg.svg", "MLIR operation graph with control-flow edges");
 }
 
 async function renderDot(dotPath, svgPath, description) {
   removeIfPresent(svgPath);
-  await run(`dot -Tsvg ${dotPath} -o ${svgPath}`);
+  await run(`dot -Tsvg ${dotPath} -o ${svgPath}`, { inputs: [dotPath] });
   const svg = readText(svgPath);
   if (!svg) throw new Error("Graphviz did not render the CFG");
   if (cfgObjectUrl) URL.revokeObjectURL(cfgObjectUrl);
@@ -370,7 +372,7 @@ async function run(command, redirects = {}) {
   try {
     if (isToolCommand(command)) {
       appendLog(`$ ${command}`);
-      const result = await runTool(command, compiler.FS);
+      const result = await runTool(command, compiler.FS, redirects.inputs);
       for (const line of result.stdout) appendLog(line);
       for (const line of result.stderr) appendLog(line, "err");
       if (result.error && !result.stderr.length) appendLog(result.error, "err");
@@ -446,6 +448,7 @@ async function compileSelectedOutput() {
   try {
     const settings = writeSource();
     if (settings.mlir) {
+      if (stage === "cfg") await Promise.all([prepareTool("mlir-opt"), prepareTool("dot")]);
       removeIfPresent("/workspace/optimized.mlir");
       await run("mlir-opt --pass-pipeline=builtin.module(canonicalize,cse) /workspace/input.mlir -o /workspace/optimized.mlir");
       outputs.mlir = readText("/workspace/optimized.mlir");
@@ -454,7 +457,8 @@ async function compileSelectedOutput() {
       if (settings.llvmIr) throw new Error("Clang AST is not applicable to LLVM IR input");
       outputs.ast = await run(commandText(settings, "ast"));
     } else if (stage === "cfg") {
-      await emitClangOutput(settings, "optimized");
+      await Promise.all([prepareTool("opt"), prepareTool("dot"),
+        emitClangOutput(settings, "optimized")]);
       await renderCfg();
     } else if (stage === "optimized" || stage === "assembly") {
       await emitClangOutput(settings, stage);
@@ -882,12 +886,24 @@ function wireUi() {
 async function loadCompiler() {
   try {
     setStatus("Downloading Clang and LLVM…", "loading");
-    const { default: createCompiler } = await import("../runtime/Compiler.js");
-    compiler = await createCompiler({
-      locateFile: (path) => new URL(`../runtime/${path}`, import.meta.url).href,
-      print: (line) => appendLog(line),
-      printErr: (line) => appendLog(line, "err"),
-      setStatus: (text) => { if (text) setStatus(text, "loading"); },
+    const [{ default: createCompiler }, wasmModule, runtimeData] = await Promise.all([
+      import("../runtime/Compiler.js"),
+      compileWasm(new URL("../runtime/Compiler.wasm", import.meta.url)),
+      downloadWasm(new URL("../runtime/Compiler.data", import.meta.url)),
+    ]);
+    compiler = await new Promise((resolve, reject) => {
+      createCompiler({
+        getPreloadedPackage: () => runtimeData,
+        instantiateWasm(imports, receive) {
+          WebAssembly.instantiate(wasmModule, imports)
+            .then(instance => receive(instance, wasmModule)).catch(reject);
+          return {};
+        },
+        locateFile: (path) => new URL(`../runtime/${path}`, import.meta.url).href,
+        print: (line) => appendLog(line),
+        printErr: (line) => appendLog(line, "err"),
+        setStatus: (text) => { if (text) setStatus(text, "loading"); },
+      }).then(resolve, reject);
     });
     compiler.FS.mkdirTree("/workspace");
     compiler.FS.chdir("/workspace");

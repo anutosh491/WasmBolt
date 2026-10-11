@@ -37,7 +37,7 @@ rm -rf "$site_dir"
 mkdir -p "$site_dir"/{ui,runtime,tools,language-services/clangd/runtime}
 cp ui/index.html "$site_dir/"
 cp ui/*.js ui/styles.css "$site_dir/ui/"
-cp runtime/exports.js "$site_dir/runtime/"
+cp runtime/{exports,load-wasm}.js "$site_dir/runtime/"
 cp tools/*.js "$site_dir/tools/"
 cp language-services/clangd/*.{js,css} "$site_dir/language-services/clangd/"
 cp "${LLVM_WASM_PREFIX}"/bin/clangd.{js,wasm} "$site_dir/language-services/clangd/runtime/"
