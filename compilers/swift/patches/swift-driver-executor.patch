@@ -1,0 +1,37 @@
+diff --git a/include/swift/Driver/Compilation.h b/include/swift/Driver/Compilation.h
+--- a/include/swift/Driver/Compilation.h
++++ b/include/swift/Driver/Compilation.h
+@@ -339,9 +339,12 @@
+   ///
+   /// \param TQ The TaskQueue used to schedule jobs for execution.
+   ///
++  /// \param AllowInPlaceExecution Whether a single job may replace this process.
++  ///
+   /// \returns result code for the Compilation's Jobs; 0 indicates success and
+   /// -2 indicates that one of the Compilation's Jobs crashed during execution
+-  Compilation::Result performJobs(std::unique_ptr<sys::TaskQueue> &&TQ);
++  Compilation::Result performJobs(std::unique_ptr<sys::TaskQueue> &&TQ,
++                                  bool AllowInPlaceExecution = true);
+ 
+   /// Returns whether the callee is permitted to pass -emit-loaded-module-trace
+   /// to a frontend job.
+diff --git a/lib/Driver/Compilation.cpp b/lib/Driver/Compilation.cpp
+--- a/lib/Driver/Compilation.cpp
++++ b/lib/Driver/Compilation.cpp
+@@ -800,13 +800,14 @@
+   return true;
+ }
+ 
+-Compilation::Result Compilation::performJobs(std::unique_ptr<TaskQueue> &&TQ) {
++Compilation::Result Compilation::performJobs(std::unique_ptr<TaskQueue> &&TQ,
++                                             bool AllowInPlaceExecution) {
+   if (AllSourceFilesPath)
+     if (!writeAllSourcesFile(Diags, AllSourceFilesPath, getInputFiles()))
+       return Compilation::Result::code(EXIT_FAILURE);
+ 
+   // If we don't have to do any cleanup work, just exec the subprocess.
+-  if (Level < OutputLevel::Parseable &&
++  if (AllowInPlaceExecution && Level < OutputLevel::Parseable &&
+       !ShowDriverTimeCompilation &&
+       (SaveTemps || TempFilePaths.empty()) &&
+       Jobs.size() == 1) {

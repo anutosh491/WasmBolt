@@ -1,0 +1,2242 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 08f69905..bdfda116 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -146,7 +146,7 @@ endif()
+ # System dependencies
+ 
+ # We know libdispatch is always unavailable on WASI
+-if(NOT CMAKE_SYSTEM_NAME STREQUAL "WASI")
++if(NOT CMAKE_SYSTEM_NAME MATCHES "WASI|Emscripten")
+     find_package(LibRT)
+     find_package(dispatch CONFIG)
+     if(NOT dispatch_FOUND)
+@@ -189,7 +189,7 @@ list(APPEND _Foundation_common_build_flags
+     "-Wno-switch"
+     "-fblocks")
+ 
+-if(NOT CMAKE_SYSTEM_NAME STREQUAL "WASI")
++if(NOT CMAKE_SYSTEM_NAME MATCHES "WASI|Emscripten")
+     list(APPEND _Foundation_common_build_flags
+         "-DDEPLOYMENT_ENABLE_LIBDISPATCH"
+         "-DSWIFT_CORELIBS_FOUNDATION_HAS_THREADS")
+@@ -202,7 +202,7 @@ if(NOT "${CMAKE_C_SIMULATE_ID}" STREQUAL "MSVC")
+         "-fno-common"
+         "-fcf-runtime-abi=swift")
+ 
+-    if(NOT CMAKE_SYSTEM_NAME STREQUAL OpenBSD)
++    if(NOT CMAKE_SYSTEM_NAME MATCHES "OpenBSD|Emscripten")
+         list(APPEND _Foundation_common_build_flags
+             "-fexceptions")
+     endif()
+@@ -238,7 +238,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
+         list(APPEND _Foundation_swift_build_flags "SHELL:-Xcc -D${def}")
+         list(APPEND _Foundation_common_build_flags "-D${def}")
+     endforeach()
+-else()
++elseif(NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+     # Assume we have threads on other platforms
+     list(APPEND _Foundation_swift_build_flags
+         "-DSWIFT_CORELIBS_FOUNDATION_HAS_THREADS")
+diff --git a/Sources/CoreFoundation/CFBundle.c b/Sources/CoreFoundation/CFBundle.c
+index cbd5b1dd..7e801989 100644
+--- a/Sources/CoreFoundation/CFBundle.c
++++ b/Sources/CoreFoundation/CFBundle.c
+@@ -42,7 +42,7 @@
+ #endif
+ #endif /* BINARY_SUPPORT_DLFCN */
+ 
+-#if TARGET_OS_MAC || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WASM
+ #include <fcntl.h>
+ #elif TARGET_OS_WIN32
+ #include <fcntl.h>
+@@ -597,7 +597,7 @@ static CFBundleRef _CFBundleGetBundleWithIdentifier(CFStringRef bundleID, void *
+ CFBundleRef CFBundleGetBundleWithIdentifier(CFStringRef bundleID) {
+     // Use the frame that called this as a hint
+     void *hint;
+-#if TARGET_OS_WASI
++#if TARGET_OS_WASM
+     hint = NULL;
+ #else
+     hint = __builtin_return_address(0);
+diff --git a/Sources/CoreFoundation/CFBundle_InfoPlist.c b/Sources/CoreFoundation/CFBundle_InfoPlist.c
+index 0c849133..d8d4ef07 100644
+--- a/Sources/CoreFoundation/CFBundle_InfoPlist.c
++++ b/Sources/CoreFoundation/CFBundle_InfoPlist.c
+@@ -15,7 +15,7 @@
+ #include "CFByteOrder.h"
+ #include "CFURLAccess.h"
+ 
+-#if (TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI) && !TARGET_OS_CYGWIN
++#if (TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM) && !TARGET_OS_CYGWIN
+ #include <dirent.h>
+ #if TARGET_OS_MAC || TARGET_OS_BSD
+ #include <sys/sysctl.h>
+@@ -142,7 +142,7 @@ CF_PRIVATE CFStringRef _CFBundleGetPlatformNameSuffix(void) {
+     return _CFBundleLinuxPlatformNameSuffix;
+ #elif TARGET_OS_BSD
+     return _CFBundleFreeBSDPlatformNameSuffix;
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+     return _CFBundleWASIPlatformNameSuffix;
+ #else
+ #error Unknown or unspecified DEPLOYMENT_TARGET
+@@ -176,7 +176,7 @@ CF_EXPORT CFStringRef _CFGetPlatformName(void) {
+ #endif
+ #elif TARGET_OS_BSD
+     return _CFBundleFreeBSDPlatformName;
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+     return _CFBundleWASIPlatformName;
+ #else
+ #error Unknown or unspecified DEPLOYMENT_TARGET
+@@ -198,7 +198,7 @@ CF_EXPORT CFStringRef _CFGetAlternatePlatformName(void) {
+ #endif
+ #elif TARGET_OS_BSD
+     return CFSTR("FreeBSD");
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+     return CFSTR("WASI");
+ #else
+ #error Unknown or unspecified DEPLOYMENT_TARGET
+diff --git a/Sources/CoreFoundation/CFBundle_Resources.c b/Sources/CoreFoundation/CFBundle_Resources.c
+index f32ce6df..3cf39ef6 100644
+--- a/Sources/CoreFoundation/CFBundle_Resources.c
++++ b/Sources/CoreFoundation/CFBundle_Resources.c
+@@ -507,7 +507,7 @@ CF_EXPORT CFStringRef _CFBundleGetCurrentPlatform(void) {
+ #endif
+ #elif TARGET_OS_BSD
+     return CFSTR("FreeBSD");
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+     return CFSTR("WASI");
+ #else
+ #error Unknown or unspecified DEPLOYMENT_TARGET
+@@ -531,7 +531,7 @@ CF_PRIVATE CFStringRef _CFBundleGetPlatformExecutablesSubdirectoryName(void) {
+ #endif
+ #elif TARGET_OS_BSD
+     return CFSTR("FreeBSD");
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+     return CFSTR("WASI");
+ #else
+ #error Unknown or unspecified DEPLOYMENT_TARGET
+diff --git a/Sources/CoreFoundation/CFBurstTrie.c b/Sources/CoreFoundation/CFBurstTrie.c
+index 84c59944..820eba66 100644
+--- a/Sources/CoreFoundation/CFBurstTrie.c
++++ b/Sources/CoreFoundation/CFBurstTrie.c
+@@ -18,7 +18,7 @@
+ #include <fcntl.h>
+ #include <sys/stat.h>
+ #include <limits.h>
+-#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ #include <unistd.h>
+ #include <sys/param.h>
+ #include <sys/mman.h>
+diff --git a/Sources/CoreFoundation/CFData.c b/Sources/CoreFoundation/CFData.c
+index 44864a8a..6859038e 100644
+--- a/Sources/CoreFoundation/CFData.c
++++ b/Sources/CoreFoundation/CFData.c
+@@ -49,7 +49,7 @@ CF_INLINE unsigned long __CFPageSize() {
+ CF_INLINE unsigned long __CFPageSize() {
+     return (unsigned long)getpagesize();
+ }
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+ CF_INLINE unsigned long __CFPageSize() {
+     // WebAssembly linear memory pages are always 64KiB in size
+     return 65536;
+diff --git a/Sources/CoreFoundation/CFDate.c b/Sources/CoreFoundation/CFDate.c
+index 098aee24..f6874462 100644
+--- a/Sources/CoreFoundation/CFDate.c
++++ b/Sources/CoreFoundation/CFDate.c
+@@ -27,7 +27,7 @@
+ #endif
+ #endif
+ 
+-#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ #include <sys/time.h>
+ #endif
+ 
+@@ -106,7 +106,7 @@ CF_EXPORT CFTimeInterval CFGetSystemUptime(void) {
+ #if TARGET_OS_MAC
+     uint64_t tsr = mach_absolute_time();
+     return (CFTimeInterval)((double)tsr * __CF1_TSRRate);
+-#elif TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#elif TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+     struct timespec res;
+     if (clock_gettime(CLOCK_MONOTONIC, &res) != 0) {
+         HALT;
+@@ -167,7 +167,7 @@ CF_PRIVATE void __CFDateInitialize(void) {
+     // To get seconds we need to divide the value by 1e7 (10000000).
+     __CFTSRRate = 1.0e7;
+     __CF1_TSRRate = 1.0 / __CFTSRRate;
+-#elif TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#elif TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+     struct timespec res;
+     if (clock_getres(CLOCK_MONOTONIC, &res) != 0) {
+         HALT;
+@@ -350,7 +350,7 @@ CFAbsoluteTime CFGregorianDateGetAbsoluteTime(CFGregorianDate gdate, CFTimeZoneR
+     CFAbsoluteTime at;
+     at = 86400.0 * __CFAbsoluteFromYMD(gdate.year - 2001, gdate.month, gdate.day);
+     at += 3600.0 * gdate.hour + 60.0 * gdate.minute + gdate.second;
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+     if (NULL != tz) {
+ 	__CFGenericValidateType(tz, CFTimeZoneGetTypeID());
+     }
+@@ -369,7 +369,7 @@ CFGregorianDate CFAbsoluteTimeGetGregorianDate(CFAbsoluteTime at, CFTimeZoneRef
+     int64_t absolute, year;
+     int8_t month, day;
+     CFAbsoluteTime fixedat;
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+     if (NULL != tz) {
+ 	__CFGenericValidateType(tz, CFTimeZoneGetTypeID());
+     }
+@@ -397,7 +397,7 @@ CFAbsoluteTime CFAbsoluteTimeAddGregorianUnits(CFAbsoluteTime at, CFTimeZoneRef
+     CFAbsoluteTime candidate_at0, candidate_at1;
+     uint8_t monthdays;
+ 
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+     if (NULL != tz) {
+ 	__CFGenericValidateType(tz, CFTimeZoneGetTypeID());
+     }
+@@ -516,7 +516,7 @@ CFGregorianUnits CFAbsoluteTimeGetDifferenceAsGregorianUnits(CFAbsoluteTime at1,
+ SInt32 CFAbsoluteTimeGetDayOfWeek(CFAbsoluteTime at, CFTimeZoneRef tz) {
+     int64_t absolute;
+     CFAbsoluteTime fixedat;
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+     if (NULL != tz) {
+ 	__CFGenericValidateType(tz, CFTimeZoneGetTypeID());
+     }
+@@ -532,7 +532,7 @@ SInt32 CFAbsoluteTimeGetDayOfYear(CFAbsoluteTime at, CFTimeZoneRef tz) {
+     CFAbsoluteTime fixedat;
+     int64_t absolute, year;
+     int8_t month, day;
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+     if (NULL != tz) {
+ 	__CFGenericValidateType(tz, CFTimeZoneGetTypeID());
+     }
+@@ -551,7 +551,7 @@ SInt32 CFAbsoluteTimeGetWeekOfYear(CFAbsoluteTime at, CFTimeZoneRef tz) {
+     int64_t absolute, year;
+     int8_t month, day;
+     CFAbsoluteTime fixedat;
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+     if (NULL != tz) {
+ 	__CFGenericValidateType(tz, CFTimeZoneGetTypeID());
+     }
+diff --git a/Sources/CoreFoundation/CFDateIntervalFormatter.c b/Sources/CoreFoundation/CFDateIntervalFormatter.c
+index 0e02f216..515e6881 100644
+--- a/Sources/CoreFoundation/CFDateIntervalFormatter.c
++++ b/Sources/CoreFoundation/CFDateIntervalFormatter.c
+@@ -22,7 +22,7 @@
+ 
+ #include <_foundation_unicode/udateintervalformat.h>
+ 
+-#if TARGET_OS_WASI
++#if TARGET_OS_WASM
+ #define LOCK() do {} while (0)
+ #define UNLOCK() do {} while (0)
+ #else
+@@ -57,7 +57,7 @@ struct __CFDateIntervalFormatter {
+     CFDateIntervalFormatterStyle _dateStyle;
+     CFDateIntervalFormatterStyle _timeStyle;
+     _CFDateIntervalFormatterBoundaryStyle _boundaryStyle;
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+     dispatch_semaphore_t _lock;
+ #endif
+     bool _modified:1;
+@@ -238,7 +238,7 @@ CFDateIntervalFormatterRef CFDateIntervalFormatterCreate(CFAllocatorRef allocato
+     memory->_dateTemplate = CFRetain(CFSTR(""));
+     memory->_formatter = NULL;
+     memory->_boundaryStyle = kCFDateIntervalFormatterBoundaryStyleDefault;
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+     memory->_lock = dispatch_semaphore_create(1);
+ #endif
+     memory->_modified = false;
+@@ -347,7 +347,7 @@ static void __CFDateIntervalFormatterDeallocate(CFTypeRef object) {
+         udtitvfmt_close(formatter->_formatter);
+     }
+     
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+     dispatch_release(formatter->_lock);
+ #endif
+ }
+diff --git a/Sources/CoreFoundation/CFFileUtilities.c b/Sources/CoreFoundation/CFFileUtilities.c
+index c2ab0b9f..837090dd 100644
+--- a/Sources/CoreFoundation/CFFileUtilities.c
++++ b/Sources/CoreFoundation/CFFileUtilities.c
+@@ -39,7 +39,7 @@
+ #include <dirent.h>
+ #include <sys/types.h>
+ 
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+ # include <pwd.h>
+ #endif
+ 
+@@ -345,7 +345,7 @@ CF_PRIVATE CFMutableArrayRef _CFCreateContentsOfDirectory(CFAllocatorRef alloc,
+     FindClose(handle);
+     pathBuf[pathLength] = '\0';
+ 
+-#elif TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#elif TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+     uint8_t extBuff[CFMaxPathSize];
+     int extBuffInteriorDotCount = 0; //people insist on using extensions like ".trace.plist", so we need to know how many dots back to look :(
+     
+@@ -448,7 +448,7 @@ CF_PRIVATE CFMutableArrayRef _CFCreateContentsOfDirectory(CFAllocatorRef alloc,
+             dirURL = CFURLCreateFromFileSystemRepresentation(alloc, (uint8_t *)dirPath, pathLength, true);
+             releaseBase = true;
+         }
+-#if !defined(__OpenBSD__) && !TARGET_OS_WASI
++#if !defined(__OpenBSD__) && !TARGET_OS_WASM
+         if (dp->d_type == DT_DIR || dp->d_type == DT_UNKNOWN || dp->d_type == DT_LNK || dp->d_type == DT_WHT) {
+ #else
+         if (dp->d_type == DT_DIR || dp->d_type == DT_UNKNOWN || dp->d_type == DT_LNK) {
+@@ -465,13 +465,13 @@ CF_PRIVATE CFMutableArrayRef _CFCreateContentsOfDirectory(CFAllocatorRef alloc,
+                     isDir = ((statBuf.st_mode & S_IFMT) == S_IFDIR);
+                 }
+             }
+-#if TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_LINUX || TARGET_OS_WASM
+             fileURL = CFURLCreateFromFileSystemRepresentationRelativeToBase(alloc, (uint8_t *)dp->d_name, namelen, isDir, dirURL);
+ #else
+             fileURL = CFURLCreateFromFileSystemRepresentationRelativeToBase(alloc, (uint8_t *)dp->d_name, dp->d_namlen, isDir, dirURL);
+ #endif
+         } else {
+-#if TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_LINUX || TARGET_OS_WASM
+             fileURL = CFURLCreateFromFileSystemRepresentationRelativeToBase (alloc, (uint8_t *)dp->d_name, namelen, false, dirURL);
+ #else
+             fileURL = CFURLCreateFromFileSystemRepresentationRelativeToBase (alloc, (uint8_t *)dp->d_name, dp->d_namlen, false, dirURL);
+@@ -558,7 +558,7 @@ CF_PRIVATE SInt32 _CFGetPathProperties(CFAllocatorRef alloc, char *path, Boolean
+     
+     if (modTime != NULL) {
+         if (fileExists) {
+-#if TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+             struct timespec ts = {statBuf.st_mtime, 0};
+ #else
+             struct timespec ts = statBuf.st_mtimespec;
+@@ -1122,7 +1122,7 @@ CF_PRIVATE void _CFIterateDirectory(CFStringRef directoryPath, Boolean appendSla
+                     }
+                 }
+             }
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+             CFIndex nameLen = strlen(dent->d_name);
+ #else
+             CFIndex nameLen = dent->d_namlen;
+@@ -1136,7 +1136,7 @@ CF_PRIVATE void _CFIterateDirectory(CFStringRef directoryPath, Boolean appendSla
+             
+             // This buffer has to be 1 bigger than the size of the one in the dirent so we can hold the extra '/' if it's required
+             // Be sure to initialize the first character to null, so that cf_strlcat below works correctly
+-            #if TARGET_OS_WASI
++            #if TARGET_OS_WASM
+             // wasi-libc's dirent.d_name is not a fixed-size array but a pointer, so we need to calculate
+             // the size of buffer at first.
+             size_t d_name_size = nameLen;
+diff --git a/Sources/CoreFoundation/CFLocale.c b/Sources/CoreFoundation/CFLocale.c
+index 06f8617f..96e0dc69 100644
+--- a/Sources/CoreFoundation/CFLocale.c
++++ b/Sources/CoreFoundation/CFLocale.c
+@@ -23,7 +23,7 @@
+ #include "CFBundle_Internal.h"
+ #include "CFLocaleInternal.h"
+ #include <stdatomic.h>
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ #include <_foundation_unicode/uloc.h>           // ICU locales
+ #include <_foundation_unicode/ulocdata.h>       // ICU locale data
+ #include <_foundation_unicode/ucal.h>
+diff --git a/Sources/CoreFoundation/CFLocaleKeys.c b/Sources/CoreFoundation/CFLocaleKeys.c
+index 7eac80e8..dcd9ce88 100644
+--- a/Sources/CoreFoundation/CFLocaleKeys.c
++++ b/Sources/CoreFoundation/CFLocaleKeys.c
+@@ -133,7 +133,7 @@ CONST_STRING_DECL(kCFCalendarIdentifierEthiopicAmeteMihret, "ethiopic");
+ CONST_STRING_DECL(kCFCalendarIdentifierEthiopicAmeteAlem, "ethiopic-amete-alem");
+ 
+ // Aliases for other platforms.
+-#if TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WIN32 || TARGET_OS_WASI
++#if TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WIN32 || TARGET_OS_WASM
+ 
+ CF_EXPORT CFStringRef const kCFBuddhistCalendar __attribute__((alias ("kCFCalendarIdentifierBuddhist")));
+ CF_EXPORT CFStringRef const kCFChineseCalendar __attribute__((alias ("kCFCalendarIdentifierChinese")));
+diff --git a/Sources/CoreFoundation/CFNumber.c b/Sources/CoreFoundation/CFNumber.c
+index fca8f611..b7ee125c 100644
+--- a/Sources/CoreFoundation/CFNumber.c
++++ b/Sources/CoreFoundation/CFNumber.c
+@@ -180,7 +180,7 @@ static const Float64Bits doubleOneBits = {.floatValue = 1.0f};
+ #define BITSFORDOUBLEZERO doubleZeroBits.bits
+ #define BITSFORDOUBLEONE  doubleOneBits.bits
+ 
+-#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ #define FLOAT_POSITIVE_2_TO_THE_64	0x1.0p+64L
+ #define FLOAT_NEGATIVE_2_TO_THE_127	-0x1.0p+127L
+ #define FLOAT_POSITIVE_2_TO_THE_127	0x1.0p+127L
+diff --git a/Sources/CoreFoundation/CFPlatform.c b/Sources/CoreFoundation/CFPlatform.c
+index 926b29ff..4dd89020 100644
+--- a/Sources/CoreFoundation/CFPlatform.c
++++ b/Sources/CoreFoundation/CFPlatform.c
+@@ -22,9 +22,14 @@
+     #include <mach-o/dyld.h>
+ #endif
+ 
+-#if TARGET_OS_WASI
++#if TARGET_OS_WASM
++#if defined(__EMSCRIPTEN__)
++#include <wasi/api.h>
++extern char **environ;
++#else
+ #include <wasi/libc-environ.h>
+ #endif
++#endif
+ 
+ #define _CFEmitInternalDiagnostics 0
+ 
+@@ -195,7 +200,7 @@ const char *_CFProcessPath(void) {
+         __CFprogname = __CFProcessPath;
+     }
+     return __CFProcessPath;
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+     __wasi_errno_t err;
+     size_t argc;
+     size_t argv_buf_size;
+@@ -445,7 +450,7 @@ static CFURLRef _CFCopyHomeDirURLForUser(const char *username, bool fallBackToHo
+ #define CFMaxHostNameSize	(CFMaxHostNameLength+1)
+ 
+ CF_PRIVATE CFStringRef _CFStringCreateHostName(void) {
+-#if TARGET_OS_WASI
++#if TARGET_OS_WASM
+     // WASI doesn't have a concept of a hostname
+     return CFSTR("");
+ #else
+@@ -491,7 +496,7 @@ CF_EXPORT CFStringRef CFCopyUserName(void) {
+                 result = CFStringCreateWithCString(kCFAllocatorSystemDefault, cname, kCFPlatformInterfaceStringEncoding);
+             }
+ 	}
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+     // WASI does not have user concept
+ #else
+ #error "Please add an implementation for CFCopyUserName() that copies the account username"
+@@ -522,7 +527,7 @@ CF_CROSS_PLATFORM_EXPORT CFStringRef CFCopyFullUserName(void) {
+     GetUserNameExW(NameDisplay, (LPWSTR)wszBuffer, &ulLength);
+ 
+     result = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, (UniChar *)wszBuffer, ulLength);
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+     // WASI does not have user concept
+ #else
+ #error "Please add an implementation for CFCopyFullUserName() that copies the full (display) user name"
+@@ -590,7 +595,7 @@ CFURLRef CFCopyHomeDirectoryURL(void) {
+     if (testPath) CFRelease(testPath);
+ 
+     return retVal;
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+     // WASI does not have user concept
+     return NULL;
+ #else
+@@ -724,7 +729,7 @@ CF_EXPORT CFURLRef CFCopyHomeDirectoryURLForUser(CFStringRef uName) {
+     CFAllocatorDeallocate(kCFAllocatorSystemDefault, pwszUserName);
+ 
+     return url;
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+     // WASI does not have user concept
+     return NULL;
+ #else
+@@ -876,12 +881,12 @@ CF_PRIVATE void __CFTSDWindowsCleanup() {
+ 
+ static _CFThreadSpecificKey __CFTSDIndexKey;
+ 
+-#if TARGET_OS_WASI
++#if TARGET_OS_WASM
+ static void *__CFThreadSpecificData;
+ #endif
+ 
+ CF_PRIVATE void __CFTSDInitialize() {
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+     static dispatch_once_t once;
+     dispatch_once(&once, ^{
+         (void)pthread_key_create(&__CFTSDIndexKey, __CFTSDFinalize);
+@@ -898,7 +903,7 @@ static void __CFTSDSetSpecific(void *arg) {
+     pthread_setspecific(__CFTSDIndexKey, arg);
+ #elif TARGET_OS_WIN32
+     FlsSetValue(__CFTSDIndexKey, arg);
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+     __CFThreadSpecificData = arg;
+ #endif
+ }
+@@ -910,7 +915,7 @@ static void *__CFTSDGetSpecific() {
+     return pthread_getspecific(__CFTSDIndexKey);
+ #elif TARGET_OS_WIN32
+     return FlsGetValue(__CFTSDIndexKey);
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+     return __CFThreadSpecificData;
+ #endif
+ }
+@@ -921,7 +926,7 @@ _Atomic(bool) __CFMainThreadHasExited = false;
+ __stdcall
+ #endif
+ static void __CFTSDFinalize(void *arg) {
+-#if TARGET_OS_WASI
++#if TARGET_OS_WASM
+     __CFMainThreadHasExited = true;
+ #else
+     if (_CFIsMainThread()) {
+@@ -955,7 +960,7 @@ static void __CFTSDFinalize(void *arg) {
+         }
+     }
+ 
+-#if _POSIX_THREADS && !TARGET_OS_WASI
++#if _POSIX_THREADS && !TARGET_OS_WASM
+     if (table->destructorCount == PTHREAD_DESTRUCTOR_ITERATIONS - 1) {    // On PTHREAD_DESTRUCTOR_ITERATIONS-1 call, destroy our data
+         free(table);
+ 
+@@ -1485,7 +1490,7 @@ CF_PRIVATE int _NS_gettimeofday(struct timeval *tv, struct timezone *tz) {
+ #pragma mark -
+ #pragma mark Linux, BSD, and WASI OSAtomic
+ 
+-#if TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#if TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ 
+ bool OSAtomicCompareAndSwapPtr(void *oldp, void *newp, void *volatile *dst) 
+ { 
+@@ -1544,7 +1549,7 @@ void OSMemoryBarrier() {
+     __sync_synchronize();
+ }
+ 
+-#endif // TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#endif // TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ 
+ #pragma mark -
+ #pragma mark Dispatch Replacements
+@@ -1558,13 +1563,13 @@ typedef struct _CF_sema_s {
+ } * _CF_sema_t;
+ 
+ CF_INLINE void _CF_sem_signal(_CF_sema_t s) {
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+     sem_post(&s->sema);
+ #endif
+ }
+ 
+ CF_INLINE void _CF_sem_wait(_CF_sema_t s) {
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+     sem_wait(&s->sema);
+ #endif
+ }
+@@ -1575,7 +1580,7 @@ static void _CF_sem_destroy(_CF_sema_t s) {
+ 
+ CF_INLINE _CFThreadSpecificKey _CF_thread_sem_key() {
+     static _CFThreadSpecificKey key = 0;
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+     static OSSpinLock lock = OS_SPINLOCK_INIT;
+     if (key == 0) {
+         OSSpinLockLock(&lock);
+@@ -1588,7 +1593,7 @@ CF_INLINE _CFThreadSpecificKey _CF_thread_sem_key() {
+     return key;
+ }
+ 
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+ CF_INLINE _CF_sema_t _CF_get_thread_semaphore() {
+     _CFThreadSpecificKey key = _CF_thread_sem_key();
+     _CF_sema_t s = (_CF_sema_t)pthread_getspecific(key);
+@@ -1623,7 +1628,7 @@ defined(__arm64__)
+ #endif
+ 
+ void _CF_dispatch_once(dispatch_once_t *predicate, void (^block)(void)) {
+-#if TARGET_OS_WASI
++#if TARGET_OS_WASM
+     if (!*predicate) {
+         block();
+         *predicate = 1;
+@@ -1659,7 +1664,7 @@ void _CF_dispatch_once(dispatch_once_t *predicate, void (^block)(void)) {
+         }
+         _CF_put_thread_semaphore(dow.dow_sema);
+     }
+-#endif // TARGET_OS_WASI
++#endif // TARGET_OS_WASM
+ }
+ 
+ #endif
+@@ -1912,8 +1917,12 @@ CF_EXPORT char **_CFEnviron(void) {
+     return *_NSGetEnviron();
+ #elif TARGET_OS_WIN32
+     return _environ;
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
++#if defined(__EMSCRIPTEN__)
++    return environ;
++#else
+     return __wasilibc_get_environ();
++#endif
+ #else
+ #if TARGET_OS_BSD
+     extern char **environ;
+@@ -1937,7 +1946,7 @@ int _CFOpenFile(const char *path, int opts) {
+ }
+ 
+ CF_CROSS_PLATFORM_EXPORT void *_CFReallocf(void *ptr, size_t size) {
+-#if TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI || defined(__OpenBSD__)
++#if TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM || defined(__OpenBSD__)
+     void *mem = realloc(ptr, size);
+     if (mem == NULL && ptr != NULL && size != 0) {
+         free(ptr);
+@@ -2286,7 +2295,7 @@ CF_EXPORT int _CFPosixSpawn(pid_t *_CF_RESTRICT pid, const char *_CF_RESTRICT pa
+     return _CFPosixSpawnImpl(pid, path, file_actions, attrp, argv, envp);
+ }
+ 
+-#elif !TARGET_OS_WIN32 && !TARGET_OS_WASI
++#elif !TARGET_OS_WIN32 && !TARGET_OS_WASM
+ 
+ #include <spawn.h>
+ 
+diff --git a/Sources/CoreFoundation/CFPlatformConverters.c b/Sources/CoreFoundation/CFPlatformConverters.c
+index db70ca61..6d7bd91a 100644
+--- a/Sources/CoreFoundation/CFPlatformConverters.c
++++ b/Sources/CoreFoundation/CFPlatformConverters.c
+@@ -27,7 +27,7 @@ CF_INLINE bool __CFIsPlatformConverterAvailable(int encoding) {
+ #endif
+ }
+ 
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+ 
+ static const CFStringEncodingConverter __CFICUBootstrap = {
+     .toBytes.standard = NULL,
+@@ -65,7 +65,7 @@ CF_PRIVATE const CFStringEncodingConverter *__CFStringEncodingGetExternalConvert
+     if (__CFIsPlatformConverterAvailable(encoding)) {
+         return &__CFPlatformBootstrap;
+     } else {
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+         if (__CFStringEncodingGetICUName(encoding)) {
+             return &__CFICUBootstrap;
+         }
+diff --git a/Sources/CoreFoundation/CFPreferences.c b/Sources/CoreFoundation/CFPreferences.c
+index 053de44f..837955d1 100644
+--- a/Sources/CoreFoundation/CFPreferences.c
++++ b/Sources/CoreFoundation/CFPreferences.c
+@@ -426,7 +426,7 @@ static CFStringRef  _CFPreferencesStandardDomainCacheKey(CFStringRef  domainName
+ static CFURLRef _CFPreferencesURLForStandardDomainWithSafetyLevel(CFStringRef domainName, CFStringRef userName, CFStringRef hostName, unsigned long safeLevel) {
+     CFURLRef theURL = NULL;
+     CFAllocatorRef prefAlloc = __CFPreferencesAllocator();
+-#if TARGET_OS_OSX || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#if TARGET_OS_OSX || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+     CFURLRef prefDir = _preferencesCreateDirectoryForUserHostSafetyLevel(userName, hostName, safeLevel);
+     CFStringRef  appName;
+     CFStringRef  fileName;
+@@ -460,7 +460,7 @@ static CFURLRef _CFPreferencesURLForStandardDomainWithSafetyLevel(CFStringRef do
+ 	CFRelease(appName);
+     }
+     if (fileName) {
+-#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+         theURL = CFURLCreateWithFileSystemPathRelativeToBase(prefAlloc, fileName, kCFURLPOSIXPathStyle, false, prefDir);
+ #elif TARGET_OS_WIN32
+ 		theURL = CFURLCreateWithFileSystemPathRelativeToBase(prefAlloc, fileName, kCFURLWindowsPathStyle, false, prefDir);
+diff --git a/Sources/CoreFoundation/CFPropertyList.c b/Sources/CoreFoundation/CFPropertyList.c
+index b5a69192..16dabbb7 100644
+--- a/Sources/CoreFoundation/CFPropertyList.c
++++ b/Sources/CoreFoundation/CFPropertyList.c
+@@ -2325,7 +2325,7 @@ static CFStringEncoding encodingForXMLData(CFDataRef data, CFErrorRef *error, CF
+         if (len == 5 && (*base == 'u' || *base == 'U') && (base[1] == 't' || base[1] == 'T') && (base[2] == 'f' || base[2] == 'F') && (base[3] == '-') && (base[4] == '8'))
+             return kCFStringEncodingUTF8;
+         encodingName = CFStringCreateWithBytes(kCFAllocatorSystemDefault, base, len, kCFStringEncodingISOLatin1, false);
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+         CFStringEncoding enc = CFStringConvertIANACharSetNameToEncoding(encodingName);
+         if (enc != kCFStringEncodingInvalidId) {
+             if (encodingName) {CFRelease(encodingName); }
+diff --git a/Sources/CoreFoundation/CFRuntime.c b/Sources/CoreFoundation/CFRuntime.c
+index 33368529..b00dc2a2 100644
+--- a/Sources/CoreFoundation/CFRuntime.c
++++ b/Sources/CoreFoundation/CFRuntime.c
+@@ -56,7 +56,7 @@ __kCFRetainEvent = 28,
+ __kCFReleaseEvent = 29
+ };
+ 
+-#if TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+ #include <malloc.h>
+ #elif TARGET_OS_BSD
+ #include <stdlib.h> // malloc()
+@@ -236,7 +236,7 @@ _CFClassTables __CFRuntimeClassTables __attribute__((aligned)) = {
+ 
+ 
+ 
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+     [_kCFRuntimeIDCFRunLoopMode] = &__CFRunLoopModeClass,
+     [_kCFRuntimeIDCFRunLoop] = &__CFRunLoopClass,
+     [_kCFRuntimeIDCFRunLoopSource] = &__CFRunLoopSourceClass,
+@@ -1160,7 +1160,7 @@ _CFThreadRef _CF_pthread_main_thread_np(void) {
+ 
+ 
+ 
+-#if TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#if TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ static void __CFInitialize(void) __attribute__ ((constructor));
+ #endif
+ #if TARGET_OS_WIN32
+@@ -1195,7 +1195,7 @@ void __CFInitialize(void) {
+ #elif _POSIX_THREADS
+         // move this next line up into the #if above after Foundation gets off this symbol. Also: <rdar://problem/39622745> Stop using _CFMainPThread
+         _CFMainPThread = pthread_self();
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+         _CFMainPThread = kNilPthreadT;
+ #else
+ #error Dont know how to get the main thread on this platform
+diff --git a/Sources/CoreFoundation/CFString.c b/Sources/CoreFoundation/CFString.c
+index b2332939..bc8eb617 100644
+--- a/Sources/CoreFoundation/CFString.c
++++ b/Sources/CoreFoundation/CFString.c
+@@ -28,17 +28,17 @@
+ #include "CFRuntime_Internal.h"
+ #include <assert.h>
+ #include <_foundation_unicode/uchar.h>
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ #include "CFConstantKeys.h"
+ #include "CFStringLocalizedFormattingInternal.h"
+ #endif
+ #include <stdarg.h>
+ #include <stdio.h>
+ #include <string.h>
+-#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ #include <unistd.h>
+ #endif
+-#if TARGET_OS_WASI
++#if TARGET_OS_WASM
+ #include <sys/types.h> // for u_char
+ #endif
+ 
+@@ -436,7 +436,7 @@ CFStringEncoding __CFDefaultEightBitStringEncoding = kCFStringEncodingInvalidId;
+ 
+ #if TARGET_OS_MAC
+ #define __defaultEncoding kCFStringEncodingMacRoman
+-#elif TARGET_OS_LINUX || TARGET_OS_WASI
++#elif TARGET_OS_LINUX || TARGET_OS_WASM
+ #define __defaultEncoding kCFStringEncodingUTF8
+ #elif TARGET_OS_WIN32
+ #define __defaultEncoding kCFStringEncodingWindowsLatin1
+@@ -6288,7 +6288,7 @@ enum {
+     CFFormatIncompleteSpecifierType = 43    /* special case for a trailing incomplete specifier */
+ };
+ 
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+ /* Only come in here if spec->type is CFFormatLongType or CFFormatDoubleType. Pass in 0 for width or precision if not specified. Returns false if couldn't do the format (with the assumption the caller falls back to unlocalized).
+ */
+ static Boolean __CFStringFormatLocalizedNumber(CFMutableStringRef output, CFLocaleRef locale, const CFPrintValue *values, const CFFormatSpec *spec, SInt32 width, SInt32 precision, Boolean hasPrecision) {
+@@ -7505,7 +7505,7 @@ static Boolean __CFStringAppendFormatCore(CFMutableStringRef outputString, CFStr
+ 	switch (specs[curSpec].type) {
+ 	case CFFormatLongType:
+ 	case CFFormatDoubleType:
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+             if (localizedFormatting && (specs[curSpec].flags & kCFStringFormatLocalizable)) {    // We have a locale, so we do localized formatting
+                 oldLength = __CFStringFormatOutputLengthIfNeeded();
+                 if (__CFStringFormatLocalizedNumber(outputString, (CFLocaleRef)formatOptions, values, &specs[curSpec], width, precision, hasPrecision)) {
+diff --git a/Sources/CoreFoundation/CFStringEncodingConverter.c b/Sources/CoreFoundation/CFStringEncodingConverter.c
+index 82c63005..e1bc97cf 100644
+--- a/Sources/CoreFoundation/CFStringEncodingConverter.c
++++ b/Sources/CoreFoundation/CFStringEncodingConverter.c
+@@ -533,7 +533,7 @@ CF_INLINE _CFEncodingConverter *__CFEncodingConverterFromDefinition(const CFStri
+             converter->toCanonicalUnicode = __CFToCanonicalUnicodeCheapMultiByteWrapper;
+             break;
+ 
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+         case kCFStringEncodingConverterICU:
+             converter->toBytes = (_CFToBytesProc)__CFStringEncodingGetICUName(encoding);
+             break;
+@@ -699,7 +699,7 @@ uint32_t CFStringEncodingUnicodeToBytes(uint32_t encoding, uint32_t flags, const
+             }
+         }
+ 
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+         if (kCFStringEncodingConverterICU == converter->definition->encodingClass) return __CFStringEncodingICUToBytes((const char *)converter->toBytes, flags, characters, numChars, usedCharLen, bytes, maxByteLen, usedByteLen);
+ #endif
+ 
+@@ -844,7 +844,7 @@ uint32_t CFStringEncodingBytesToUnicode(uint32_t encoding, uint32_t flags, const
+ 
+     if (!converter) return kCFStringEncodingConverterUnavailable;
+ 
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+     if (kCFStringEncodingConverterICU == converter->definition->encodingClass) return __CFStringEncodingICUToUnicode((const char *)converter->toBytes, flags, bytes, numBytes, usedByteLen, characters, maxCharLen, usedCharLen);
+ #endif
+ 
+@@ -888,7 +888,7 @@ CF_PRIVATE CFIndex CFStringEncodingCharLengthForBytes(uint32_t encoding, uint32_
+     const _CFEncodingConverter *converter = __CFGetConverter(encoding);
+ 
+     if (converter) {
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+         if (kCFStringEncodingConverterICU == converter->definition->encodingClass) return __CFStringEncodingICUCharLength((const char *)converter->toBytes, flags, bytes, numBytes);
+ #endif
+         
+@@ -932,7 +932,7 @@ CF_PRIVATE CFIndex CFStringEncodingByteLengthForCharacters(uint32_t encoding, ui
+     const _CFEncodingConverter *converter = __CFGetConverter(encoding);
+ 
+     if (converter) {
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+         if (kCFStringEncodingConverterICU == converter->definition->encodingClass) return __CFStringEncodingICUByteLength((const char *)converter->toBytes, flags, characters, numChars);
+ #endif
+ 
+@@ -1017,7 +1017,7 @@ CF_PRIVATE const CFStringEncoding *CFStringEncodingListOfAvailableEncodings(void
+     if (NULL == encodings) {
+         CFStringEncoding *list = (CFStringEncoding *)__CFBuiltinEncodings;
+         CFIndex numICUConverters = 0, numPlatformConverters = 0;
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+         CFStringEncoding *icuConverters = __CFStringEncodingCreateICUEncodings(NULL, &numICUConverters);
+ #else
+         CFStringEncoding *icuConverters = NULL;
+diff --git a/Sources/CoreFoundation/CFStringUtilities.c b/Sources/CoreFoundation/CFStringUtilities.c
+index ff6a73cb..e1953210 100644
+--- a/Sources/CoreFoundation/CFStringUtilities.c
++++ b/Sources/CoreFoundation/CFStringUtilities.c
+@@ -18,7 +18,7 @@
+ #include "CFString_Internal.h"
+ #include <limits.h>
+ #include <stdlib.h>
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+ #include <_foundation_unicode/ucol.h>
+ #include <_foundation_unicode/ucoleitr.h>
+ #endif
+@@ -111,7 +111,7 @@ CFStringEncoding CFStringConvertIANACharSetNameToEncoding(CFStringRef charsetNam
+ 
+     encoding = __CFStringEncodingGetFromCanonicalName(name);
+ 
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+     if (kCFStringEncodingInvalidId == encoding) encoding = __CFStringEncodingGetFromICUName(name);
+ #endif
+     
+@@ -262,7 +262,7 @@ CFStringEncoding CFStringGetMostCompatibleMacStringEncoding(CFStringEncoding enc
+ 
+ #define kCFStringCompareAllocationIncrement (128)
+ 
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+ 
+ // -------------------------------------------------------------------------------------------------
+ //	CompareSpecials - ignore case & diacritic differences
+@@ -425,7 +425,7 @@ static UCollator *__CFStringCopyDefaultCollator(CFLocaleRef compareLocale) {
+     return collator;
+ }
+ 
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+ static void __collatorFinalize(UCollator *collator) {
+     CFLocaleRef locale = _CFGetTSD(__CFTSDKeyCollatorLocale);
+     _CFSetTSD(__CFTSDKeyCollatorUCollator, NULL, NULL);
+@@ -578,7 +578,7 @@ CF_PRIVATE CFComparisonResult _CFCompareStringsWithLocale(CFStringInlineBuffer *
+     CFRange range1 = str1Range;
+     CFRange range2 = str2Range;
+     SInt32 order;
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+     Boolean isEqual;
+     bool forcedOrdering = ((options & kCFCompareForcedOrdering) ? true : false);
+ 
+@@ -611,7 +611,7 @@ CF_PRIVATE CFComparisonResult _CFCompareStringsWithLocale(CFStringInlineBuffer *
+ 	range2.location = __extendLocationBackward(range2.location - 1, str2, nonBaseBMP, punctBMP);
+     }
+ 
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+     // First we try to use the last one used on this thread, if the locale is the same,
+     // otherwise we try to check out a default one, or then we create one.
+     UCollator *threadCollator = _CFGetTSD(__CFTSDKeyCollatorUCollator);
+@@ -633,7 +633,7 @@ CF_PRIVATE CFComparisonResult _CFCompareStringsWithLocale(CFStringInlineBuffer *
+ 	range1.length = (str1Range.location + str1Range.length) - range1.location;
+ 	range2.length = (str2Range.location + str2Range.length) - range2.location;
+ 
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+         if ((NULL != collator) && (__CompareTextDefault(collator, options, characters1, range1.length, characters2, range2.length, &isEqual, &order) == 0 /* noErr */)) {
+             compResult = ((isEqual && !forcedOrdering) ? kCFCompareEqualTo : ((order < 0) ? kCFCompareLessThan : kCFCompareGreaterThan));
+         } else
+@@ -709,7 +709,7 @@ CF_PRIVATE CFComparisonResult _CFCompareStringsWithLocale(CFStringInlineBuffer *
+                 }
+             }
+ 
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+             if ((NULL != collator) && (__CompareTextDefault(collator, options, characters1, range1.length, characters2, range2.length, &isEqual, &order) ==  0 /* noErr */)) {
+                 if (isEqual) {
+                     if (forcedOrdering && (kCFCompareEqualTo == compResult) && (0 != order)) compResult = ((order < 0) ? kCFCompareLessThan : kCFCompareGreaterThan);
+@@ -753,7 +753,7 @@ CF_PRIVATE CFComparisonResult _CFCompareStringsWithLocale(CFStringInlineBuffer *
+         if (buffer2Len > 0) CFAllocatorDeallocate(kCFAllocatorSystemDefault, buffer2);
+     }
+ 
+-#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM
+     if (collator == threadCollator) {
+ 	// do nothing, already cached
+     } else {
+diff --git a/Sources/CoreFoundation/CFTimeZone.c b/Sources/CoreFoundation/CFTimeZone.c
+index 29f59b3b..c9253288 100644
+--- a/Sources/CoreFoundation/CFTimeZone.c
++++ b/Sources/CoreFoundation/CFTimeZone.c
+@@ -25,12 +25,12 @@
+ #include <_foundation_unicode/udat.h>
+ #include <_foundation_unicode/ustring.h>
+ #include "CFDateFormatter.h"
+-#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ #include <dirent.h>
+ #include <unistd.h>
+-#if !TARGET_OS_ANDROID && !TARGET_OS_WASI
++#if !TARGET_OS_ANDROID && !TARGET_OS_WASM
+ #include <sys/fcntl.h>
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+ #include <fcntl.h>
+ #else
+ #include <sys/endian.h>
+@@ -49,7 +49,7 @@
+ #include <tzfile.h>
+ #define MACOS_TZDIR1 "/usr/share/zoneinfo/"          // 10.12 and earlier
+ #define MACOS_TZDIR2 "/var/db/timezone/zoneinfo/"    // 10.13 onwards
+-#elif TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#elif TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ #ifndef TZDIR
+ #define TZDIR	"/usr/share/zoneinfo/" /* Time zone object file directory */
+ #endif /* !defined TZDIR */
+@@ -59,7 +59,7 @@
+ #endif /* !defined TZDEFAULT */
+ #endif
+ 
+-#if TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WIN32 || TARGET_OS_WASI
++#if TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WIN32 || TARGET_OS_WASM
+ struct tzhead {
+     char	tzh_magic[4];		/* TZ_MAGIC */
+     char	tzh_reserved[16];	/* reserved for future use */
+@@ -348,7 +348,7 @@ static CFMutableArrayRef __CFCopyAndroidTimeZoneList() {
+     return result;
+ }
+ 
+-#elif TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#elif TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ static CFMutableArrayRef __CFCopyRecursiveDirectoryList() {
+     CFMutableArrayRef result = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
+ #if !TARGET_OS_ANDROID
+@@ -704,7 +704,7 @@ static void __InitTZStrings(void) {
+ 
+ #elif TARGET_OS_ANDROID || TARGET_OS_WINDOWS
+ // Nothing
+-#elif TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#elif TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ static void __InitTZStrings(void) {
+     __tzZoneInfo = CFSTR(TZDIR);
+     __tzDir = TZDIR "zone.tab";
+@@ -752,7 +752,7 @@ static CFTimeZoneRef __CFTimeZoneCreateSystem(void) {
+         if (result) return result;
+     }
+ 
+-#if !TARGET_OS_ANDROID && !TARGET_OS_WASI
++#if !TARGET_OS_ANDROID && !TARGET_OS_WASM
+     if (!__tzZoneInfo) __InitTZStrings();
+     ret = readlink(TZDEFAULT, linkbuf, sizeof(linkbuf));
+     // The link can be relative, we treat this the same as if there was no link
+@@ -769,7 +769,7 @@ static CFTimeZoneRef __CFTimeZoneCreateSystem(void) {
+     } else
+ #endif
+     {
+-        #if !TARGET_OS_WASI
++        #if !TARGET_OS_WASM
+         // TODO: This can still fail on Linux if the time zone is not recognized by ICU later
+         // Try localtime
+         tzset();
+@@ -1229,7 +1229,7 @@ Boolean _CFTimeZoneInit(CFTimeZoneRef timeZone, CFStringRef name, CFDataRef data
+ 
+     return FALSE;
+ #else
+-#if !TARGET_OS_ANDROID && !TARGET_OS_WASI
++#if !TARGET_OS_ANDROID && !TARGET_OS_WASM
+ 
+     if (!__tzZoneInfo) __InitTZStrings();
+     if (!__tzZoneInfo) return false;
+@@ -1249,7 +1249,7 @@ Boolean _CFTimeZoneInit(CFTimeZoneRef timeZone, CFStringRef name, CFDataRef data
+         if (mapping) {
+             name = mapping;
+         }
+-#if !TARGET_OS_ANDROID && !TARGET_OS_WASI
++#if !TARGET_OS_ANDROID && !TARGET_OS_WASM
+         else if (CFStringHasPrefix(name, __tzZoneInfo)) {
+             CFMutableStringRef unprefixed = CFStringCreateMutableCopy(kCFAllocatorSystemDefault, CFStringGetLength(name), name);
+             CFStringDelete(unprefixed, CFRangeMake(0, CFStringGetLength(__tzZoneInfo)));
+diff --git a/Sources/CoreFoundation/CFURL.c b/Sources/CoreFoundation/CFURL.c
+index a974ae1a..704f731d 100644
+--- a/Sources/CoreFoundation/CFURL.c
++++ b/Sources/CoreFoundation/CFURL.c
+@@ -22,7 +22,7 @@
+ #include <stdlib.h>
+ #include <stdio.h>
+ #include <string.h>
+-#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ #if TARGET_OS_OSX
+ #include "CFNumberFormatter.h"
+ #endif
+@@ -2278,7 +2278,7 @@ static CFURLRef _CFURLCreateWithFileSystemRepresentation(CFAllocatorRef allocato
+ #endif
+     struct __CFURL *result = NULL;
+     if (bufLen > 0) {
+-#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+         Boolean isAbsolute = bufLen && (*buffer == '/');
+         Boolean addedPercentEncoding;
+         Boolean releaseBaseURL = false;
+@@ -4106,7 +4106,7 @@ static CFStringRef URLPathToPOSIXPath(CFStringRef path, CFAllocatorRef allocator
+     return result;
+ }
+ 
+-#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ static Boolean CanonicalFileURLStringToFileSystemRepresentation(CFStringRef str, UInt8 *inBuffer, CFIndex inBufferLen)
+ {
+     size_t fileURLPrefixLength;
+diff --git a/Sources/CoreFoundation/CFURLAccess.c b/Sources/CoreFoundation/CFURLAccess.c
+index 2e700c60..267d864b 100644
+--- a/Sources/CoreFoundation/CFURLAccess.c
++++ b/Sources/CoreFoundation/CFURLAccess.c
+@@ -24,13 +24,13 @@ CFData read/write routines
+ #include "CFNumber.h"
+ #include <string.h>
+ #include <ctype.h>
+-#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ #include <stdlib.h>
+ #include <unistd.h>
+ #include <dirent.h>
+ #include <sys/stat.h>
+ #include <sys/types.h>
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+ #include <pwd.h>
+ #endif
+ #include <fcntl.h>
+@@ -202,7 +202,7 @@ static CFDictionaryRef _CFFileURLCreatePropertiesFromResource(CFAllocatorRef all
+     return propertyDict;
+ }
+ 
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+ static Boolean _CFFileURLWritePropertiesToResource(CFURLRef url, CFDictionaryRef propertyDict, SInt32 *errorCode) {
+     CFTypeRef buffer[16];
+     CFTypeRef *keys;
+@@ -236,7 +236,7 @@ static Boolean _CFFileURLWritePropertiesToResource(CFURLRef url, CFDictionaryRef
+                 CFNumberRef modeNum = (CFNumberRef)value;
+                 CFNumberGetValue(modeNum, kCFNumberSInt32Type, &mode);
+             } else {
+-#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ #define MODE_TYPE mode_t
+ #elif TARGET_OS_WIN32
+ #define MODE_TYPE uint16_t
+@@ -778,7 +778,7 @@ Boolean CFURLWriteDataAndPropertiesToResource(CFURLRef url, CFDataRef data, CFDi
+                 if (!success && errorCode) *errorCode = kCFURLUnknownError;
+             }
+         }
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+         if (propertyDict) {
+             if (!_CFFileURLWritePropertiesToResource(url, propertyDict, errorCode))
+                 success = false;
+diff --git a/Sources/CoreFoundation/CFUtilities.c b/Sources/CoreFoundation/CFUtilities.c
+index 6d0465d4..9ac86fb8 100644
+--- a/Sources/CoreFoundation/CFUtilities.c
++++ b/Sources/CoreFoundation/CFUtilities.c
+@@ -18,7 +18,7 @@
+ #include "CFPriv.h"
+ #include "CFInternal.h"
+ #include "CFConstantKeys.h"
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+ #include "CFBundle_Internal.h"
+ #endif
+ #include "CFPriv.h"
+@@ -26,7 +26,7 @@
+ #include "CFBundle.h"
+ #endif
+ #include "CFURLAccess.h"
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+ #include "CFPropertyList.h"
+ #endif
+ #if TARGET_OS_WIN32
+@@ -69,7 +69,7 @@
+ #include <os/lock.h>
+ #endif
+ 
+-#if TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#if TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ #include <string.h>
+ #include <sys/mman.h>
+ #endif
+@@ -359,7 +359,7 @@ static CFDictionaryRef _CFCopyVersionDictionary(CFStringRef path) {
+     return (CFDictionaryRef)plist;
+ }
+ 
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+ CFStringRef _CFCopySystemVersionDictionaryValue(CFStringRef key) {
+     CFStringRef versionString;
+     CFDictionaryRef dict = _CFCopyServerVersionDictionary();
+@@ -662,7 +662,7 @@ CF_INLINE BOOL _CFCanChangeEUIDs(void) {
+ #endif
+ }
+ 
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+ typedef struct _ugids {
+     uid_t _euid;
+     uid_t _egid;
+@@ -926,7 +926,7 @@ static void _populateBanner(char **banner, char **time, char **thread, int *bann
+ #elif TARGET_OS_WIN32
+     *bannerLen = asprintf(banner, "%04d-%02d-%02d %02d:%02d:%02d.%03d %s[%d:%lx] ", year, month, day, hour, minute, second, ms, *_CFGetProgname(), getpid(), GetCurrentThreadId());
+     asprintf(thread, "%lx", GetCurrentThreadId());
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+     _CFThreadRef tid = 0;
+     // When pthread API is available from wasi-libc, use it. Otherwise use the dummy value.
+ # if _POSIX_THREADS
+@@ -1116,7 +1116,7 @@ void CFLog(int32_t lev, CFStringRef format, ...) {
+     va_list args;
+     va_start(args, format); 
+     
+-    #if !TARGET_OS_WASI
++    #if !TARGET_OS_WASM
+     _CFLogvEx3(NULL, NULL, NULL, NULL, lev, format, args, __builtin_return_address(0));
+     #else
+     _CFLogvEx3(NULL, NULL, NULL, NULL, lev, format, args, NULL);
+@@ -1372,7 +1372,7 @@ CF_PRIVATE Boolean _CFReadMappedFromFile(CFStringRef path, Boolean map, Boolean
+     if (0LL == statBuf.st_size) {
+         bytes = malloc(8); // don't return constant string -- it's freed!
+ 	length = 0;
+-#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+     } else if (map) {
+         if((void *)-1 == (bytes = mmap(0, (size_t)statBuf.st_size, PROT_READ, MAP_PRIVATE, fd, 0))) {
+ 	    int32_t savederrno = errno;
+@@ -1667,7 +1667,7 @@ CF_EXPORT Boolean _CFExtensionIsValidToAppend(CFStringRef extension) {
+ }
+ 
+ 
+-#if DEPLOYMENT_RUNTIME_SWIFT && !TARGET_OS_WASI
++#if DEPLOYMENT_RUNTIME_SWIFT && !TARGET_OS_WASM
+ 
+ CFDictionaryRef __CFGetEnvironment() {
+     static dispatch_once_t once = 0L;
+@@ -1676,7 +1676,7 @@ CFDictionaryRef __CFGetEnvironment() {
+ #if TARGET_OS_MAC
+         extern char ***_NSGetEnviron(void);
+         char **envp = *_NSGetEnviron();
+-#elif TARGET_OS_BSD || TARGET_OS_CYGWIN || TARGET_OS_WASI
++#elif TARGET_OS_BSD || TARGET_OS_CYGWIN || TARGET_OS_WASM
+         extern char **environ;
+         char **envp = environ;
+ #elif TARGET_OS_LINUX
+diff --git a/Sources/CoreFoundation/CFXMLPreferencesDomain.c b/Sources/CoreFoundation/CFXMLPreferencesDomain.c
+index 4b02b1c1..2364d5d6 100644
+--- a/Sources/CoreFoundation/CFXMLPreferencesDomain.c
++++ b/Sources/CoreFoundation/CFXMLPreferencesDomain.c
+@@ -55,7 +55,7 @@ static void __CFMilliSleep(uint32_t msecs) {
+     SleepEx(msecs, false);
+ #elif defined(__svr4__) || defined(__hpux__)
+     sleep((msecs + 900) / 1000);
+-#elif TARGET_OS_OSX || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#elif TARGET_OS_OSX || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+     struct timespec input;
+     input.tv_sec = msecs / 1000;
+     input.tv_nsec = (msecs - input.tv_sec * 1000) * 1000000;
+diff --git a/Sources/CoreFoundation/CMakeLists.txt b/Sources/CoreFoundation/CMakeLists.txt
+index bb015025..2372fd2c 100644
+--- a/Sources/CoreFoundation/CMakeLists.txt
++++ b/Sources/CoreFoundation/CMakeLists.txt
+@@ -117,10 +117,12 @@ target_precompile_headers(CoreFoundation PRIVATE internalInclude/CoreFoundation_
+ 
+ target_link_libraries(CoreFoundation
+     PRIVATE
+-        _FoundationICU
+-        dispatch)
++        _FoundationICU)
++if(NOT CMAKE_SYSTEM_NAME MATCHES "WASI|Emscripten")
++    target_link_libraries(CoreFoundation PRIVATE dispatch)
++endif()
+ 
+-if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
++if(CMAKE_SYSTEM_NAME MATCHES "WASI|Emscripten")
+     # On WASI, we use vendored BlocksRuntime instead of the one from libdispatch
+     add_subdirectory(BlockRuntime)
+     # Add BlocksRuntime object library to CoreFoundation static archive
+diff --git a/Sources/CoreFoundation/include/CFBundle_BinaryTypes.h b/Sources/CoreFoundation/include/CFBundle_BinaryTypes.h
+index 33e74b3f..f457c485 100644
+--- a/Sources/CoreFoundation/include/CFBundle_BinaryTypes.h
++++ b/Sources/CoreFoundation/include/CFBundle_BinaryTypes.h
+@@ -28,7 +28,7 @@ CF_EXTERN_C_BEGIN
+ #define BINARY_SUPPORT_DLL 1
+ #elif TARGET_OS_LINUX || TARGET_OS_BSD
+ #define BINARY_SUPPORT_DLFCN 1
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+ #else
+ #error Unknown or unspecified DEPLOYMENT_TARGET
+ #endif
+diff --git a/Sources/CoreFoundation/include/CFLocking.h b/Sources/CoreFoundation/include/CFLocking.h
+index 486b6d78..9043bd84 100644
+--- a/Sources/CoreFoundation/include/CFLocking.h
++++ b/Sources/CoreFoundation/include/CFLocking.h
+@@ -96,7 +96,7 @@ typedef CFLock_t OSSpinLock;
+ #define OSSpinLockLock(lock) __CFLock(lock)
+ #define OSSpinLockUnlock(lock) __CFUnlock(lock)
+ 
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+ 
+ // Empty shims until https://bugs.swift.org/browse/SR-12097 is resolved.
+ typedef int32_t CFLock_t;
+diff --git a/Sources/CoreFoundation/include/CFPriv.h b/Sources/CoreFoundation/include/CFPriv.h
+index b403db10..b34632d8 100644
+--- a/Sources/CoreFoundation/include/CFPriv.h
++++ b/Sources/CoreFoundation/include/CFPriv.h
+@@ -59,7 +59,7 @@ CF_EXPORT const char *_CFProcessPath(void);
+ CF_EXPORT const char **_CFGetProcessPath(void);
+ CF_EXPORT const char **_CFGetProgname(void);
+ 
+-#if !TARGET_OS_WIN32 && !TARGET_OS_WASI
++#if !TARGET_OS_WIN32 && !TARGET_OS_WASM
+ #include <sys/types.h>
+ 
+ CF_EXPORT void _CFGetUGIDs(uid_t *euid, gid_t *egid);
+@@ -635,7 +635,7 @@ typedef CF_OPTIONS(CFOptionFlags, _CFBundleFilteredPlistOptions) {
+     _CFBundleFilteredPlistMemoryMapped = 1
+ } API_AVAILABLE(macos(10.8), ios(6.0), watchos(2.0), tvos(9.0));
+ 
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+ CF_EXPORT CFPropertyListRef _CFBundleCreateFilteredInfoPlist(CFBundleRef bundle, CFSetRef keyPaths, _CFBundleFilteredPlistOptions options) API_AVAILABLE(macos(10.8), ios(6.0), watchos(2.0), tvos(9.0));
+ CF_EXPORT CFPropertyListRef _CFBundleCreateFilteredLocalizedInfoPlist(CFBundleRef bundle, CFSetRef keyPaths, CFStringRef localizationName, _CFBundleFilteredPlistOptions options) API_AVAILABLE(macos(10.8), ios(6.0), watchos(2.0), tvos(9.0));
+ #endif
+diff --git a/Sources/CoreFoundation/include/CFPropertyList.h b/Sources/CoreFoundation/include/CFPropertyList.h
+index cd0bb794..17a0ae9d 100644
+--- a/Sources/CoreFoundation/include/CFPropertyList.h
++++ b/Sources/CoreFoundation/include/CFPropertyList.h
+@@ -82,7 +82,7 @@ Boolean CFPropertyListIsValid(CFPropertyListRef plist, CFPropertyListFormat form
+ 
+ CF_IMPLICIT_BRIDGING_DISABLED
+ 
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+ /* Writes the bytes of a plist serialization out to the stream.  The
+  * stream must be opened and configured -- the function simply writes
+  * a bunch of bytes to the stream. The output plist format can be chosen.
+diff --git a/Sources/CoreFoundation/include/CFTargetConditionals.h b/Sources/CoreFoundation/include/CFTargetConditionals.h
+index ed36cd64..5141308f 100644
+--- a/Sources/CoreFoundation/include/CFTargetConditionals.h
++++ b/Sources/CoreFoundation/include/CFTargetConditionals.h
+@@ -118,6 +118,14 @@
+ #define TARGET_OS_ANDROID      0
+ #define TARGET_OS_CYGWIN       0
+ #define TARGET_OS_WASI         0
++#elif __EMSCRIPTEN__
++#define TARGET_OS_DARWIN       0
++#define TARGET_OS_LINUX        0
++#define TARGET_OS_WINDOWS      0
++#define TARGET_OS_BSD          0
++#define TARGET_OS_ANDROID      0
++#define TARGET_OS_CYGWIN       0
++#define TARGET_OS_WASI         0
+ #elif __unix__
+ #define TARGET_OS_DARWIN       0
+ #define TARGET_OS_LINUX        0
+@@ -138,6 +146,13 @@
+ #error unknown operating system
+ #endif
+ 
++#if __EMSCRIPTEN__
++#define TARGET_OS_EMSCRIPTEN   1
++#else
++#define TARGET_OS_EMSCRIPTEN   0
++#endif
++#define TARGET_OS_WASM (TARGET_OS_WASI || TARGET_OS_EMSCRIPTEN)
++
+ #define TARGET_OS_WIN32        TARGET_OS_WINDOWS
+ #define TARGET_OS_MAC          TARGET_OS_DARWIN
+ #define TARGET_OS_OSX          TARGET_OS_DARWIN
+diff --git a/Sources/CoreFoundation/include/CoreFoundation.h b/Sources/CoreFoundation/include/CoreFoundation.h
+index 027f067d..85406f0d 100644
+--- a/Sources/CoreFoundation/include/CoreFoundation.h
++++ b/Sources/CoreFoundation/include/CoreFoundation.h
+@@ -74,14 +74,14 @@
+ 
+ #include "ForSwiftFoundationOnly.h"
+ 
+-#if TARGET_OS_OSX || TARGET_OS_IPHONE || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI || TARGET_OS_BSD
+-#  if !TARGET_OS_WASI
++#if TARGET_OS_OSX || TARGET_OS_IPHONE || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASM || TARGET_OS_BSD
++#  if !TARGET_OS_WASM
+ #include "CFMessagePort.h"
+ #include "CFPlugIn.h"
+ #  endif
+ #include "CFRunLoop.h"
+ #include "CFStream.h"
+-#  if !TARGET_OS_WASI
++#  if !TARGET_OS_WASM
+ #include "CFSocket.h"
+ #include "CFMachPort.h"
+ #  endif
+diff --git a/Sources/CoreFoundation/include/ForSwiftFoundationOnly.h b/Sources/CoreFoundation/include/ForSwiftFoundationOnly.h
+index 53a5d560..5ca1cc7a 100644
+--- a/Sources/CoreFoundation/include/ForSwiftFoundationOnly.h
++++ b/Sources/CoreFoundation/include/ForSwiftFoundationOnly.h
+@@ -37,7 +37,7 @@
+ #define WIN32_LEAN_AND_MEAN
+ #define _CRT_NONSTDC_NO_DEPRECATE
+ #include <Windows.h>
+-#elif !TARGET_OS_WASI
++#elif !TARGET_OS_WASM
+ #include <fts.h>
+ #endif
+ #if __has_include(<unistd.h>)
+@@ -76,7 +76,7 @@
+ #else
+ #include <linux/stat.h>
+ #endif
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+ #include <fcntl.h>
+ #include <sys/stat.h>
+ // Define _WASI_EMULATED_MMAN here to use the emulated mman functions in
+@@ -213,7 +213,7 @@ struct _NSMutableStringBridge {
+     void (*_cfAppendCString)(CFTypeRef str, const char *chars, CFIndex appendLength);
+ };
+ 
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+ struct _NSRunLoop {
+     _Nonnull CFTypeRef (*_Nonnull _new)(CFRunLoopRef rl);
+ };
+@@ -279,7 +279,7 @@ struct _CFSwiftBridge {
+     struct _NSMutableSetBridge NSMutableSet;
+     struct _NSStringBridge NSString;
+     struct _NSMutableStringBridge NSMutableString;
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+     struct _NSRunLoop NSRunLoop;
+ #endif
+     struct _NSCharacterSetBridge NSCharacterSet;
+@@ -408,7 +408,7 @@ typedef unsigned long _CFThreadSpecificKey;
+ typedef pthread_t _CFThreadRef;
+ typedef pthread_attr_t _CFThreadAttributes;
+ typedef pthread_key_t _CFThreadSpecificKey;
+-#elif TARGET_OS_WASI // WASI without pthreads
++#elif TARGET_OS_WASM // WASI without pthreads
+ typedef void *_CFThreadRef;
+ typedef void *_CFThreadAttributes;
+ typedef void *_CFThreadSpecificKey;
+@@ -506,7 +506,7 @@ static inline bool _resizeConditionalAllocationBuffer(_ConditionalAllocationBuff
+     return true;
+ }
+ 
+-#if TARGET_OS_WASI
++#if TARGET_OS_WASM
+ static inline bool _withStackOrHeapBuffer(size_t amount, void (__attribute__((noescape)) ^ _Nonnull applier)(_ConditionalAllocationBuffer *_Nonnull)) {
+     _ConditionalAllocationBuffer buffer;
+     buffer.capacity = amount;
+@@ -565,7 +565,7 @@ CF_CROSS_PLATFORM_EXPORT int _CFOpenFile(const char *path, int opts);
+ static inline int _direntNameLength(struct dirent *entry) {
+ #ifdef _D_EXACT_NAMLEN  // defined on Linux
+     return _D_EXACT_NAMLEN(entry);
+-#elif TARGET_OS_LINUX || TARGET_OS_ANDROID || TARGET_OS_WASI
++#elif TARGET_OS_LINUX || TARGET_OS_ANDROID || TARGET_OS_WASM
+     return strlen(entry->d_name);
+ #else
+     return entry->d_namlen;
+@@ -578,7 +578,7 @@ static inline char *_direntName(struct dirent *entry) {
+ 
+ // major() and minor() might be implemented as macros or functions.
+ static inline unsigned int _dev_major(dev_t rdev) {
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+     return major(rdev);
+ #else
+     // WASI does not have device numbers
+@@ -587,7 +587,7 @@ static inline unsigned int _dev_major(dev_t rdev) {
+ }
+ 
+ static inline unsigned int _dev_minor(dev_t rdev) {
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+     return minor(rdev);
+ #else
+     // WASI does not have device numbers
+@@ -712,7 +712,7 @@ typedef struct _REPARSE_DATA_BUFFER {
+ } REPARSE_DATA_BUFFER;
+ #endif
+ 
+-#if TARGET_OS_WASI
++#if TARGET_OS_WASM
+ static inline uint8_t _getConst_DT_DIR(void) { return DT_DIR; }
+ static inline int32_t _getConst_O_CREAT(void) { return O_CREAT; }
+ static inline int32_t _getConst_O_DIRECTORY(void) { return O_DIRECTORY; }
+diff --git a/Sources/CoreFoundation/internalInclude/CFBundle_Internal.h b/Sources/CoreFoundation/internalInclude/CFBundle_Internal.h
+index b087fca1..63a11c8a 100644
+--- a/Sources/CoreFoundation/internalInclude/CFBundle_Internal.h
++++ b/Sources/CoreFoundation/internalInclude/CFBundle_Internal.h
+@@ -32,7 +32,7 @@ CF_EXTERN_C_BEGIN
+ // FHS bundles are supported on the Swift and C runtimes, except on Windows.
+ #if !DEPLOYMENT_RUNTIME_OBJC && !TARGET_OS_WIN32
+ 
+-#if TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_ANDROID || TARGET_OS_WASI
++#if TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_ANDROID || TARGET_OS_WASM
+ #define _CFBundleFHSSharedLibraryFilenamePrefix CFSTR("lib")
+ #define _CFBundleFHSSharedLibraryFilenameSuffix CFSTR(".so")
+ #elif TARGET_OS_MAC
+diff --git a/Sources/CoreFoundation/internalInclude/CFInternal.h b/Sources/CoreFoundation/internalInclude/CFInternal.h
+index a3487931..b5f4b969 100644
+--- a/Sources/CoreFoundation/internalInclude/CFInternal.h
++++ b/Sources/CoreFoundation/internalInclude/CFInternal.h
+@@ -101,7 +101,7 @@ CF_EXTERN_C_BEGIN
+ #include <stdatomic.h>
+ #include "Block.h"
+ 
+-#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ 
+ #if TARGET_OS_MAC || (TARGET_OS_BSD && !defined(__OpenBSD__)) || TARGET_OS_ANDROID
+ #include <xlocale.h>
+@@ -110,7 +110,7 @@ CF_EXTERN_C_BEGIN
+ #include <sys/time.h>
+ #include <signal.h>
+ #include <stdio.h>
+-#endif // TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#endif // TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ 
+ #if __has_include(<unistd.h>)
+ #include <unistd.h>
+@@ -319,13 +319,13 @@ static inline void __CFRuntimeSetValue(CFTypeRef cf, uint8_t n1, uint8_t n2, uin
+     __CFInfoType newInfo;
+     __CFInfoType mask = __CFInfoMask(n1, n2);
+ 	
+-    #if !TARGET_OS_WASI
++    #if !TARGET_OS_WASM
+     do {
+     #endif
+         // maybe don't need to do the negation part because the right side promises that we are not going to touch the rest of the word
+         newInfo = (info & ~mask) | ((x << n2) & mask);
+     // Atomics are not supported on WASI, see https://bugs.swift.org/browse/SR-12097 for more details	
+-    #if !TARGET_OS_WASI
++    #if !TARGET_OS_WASM
+     } while (!atomic_compare_exchange_weak(&(((CFRuntimeBase *)cf)->_cfinfoa), &info, newInfo));
+     #else
+     ((CFRuntimeBase *)cf)->_cfinfoa = newInfo;
+@@ -647,7 +647,7 @@ CF_INLINE int _CFRecursiveMutexUnlock(_CFRecursiveMutex *mutex) {
+   LeaveCriticalSection(mutex);
+   return 0;
+ }
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+ // For wasi-libc without pthread support (_POSIX_THREADS), just assume that it's single-threaded.
+ // wasi-libc with pthread support is handled by the _POSIX_THREADS case above.
+ typedef void *_CFMutex;
+@@ -701,7 +701,7 @@ typedef uint32_t os_unfair_lock_options_t;
+ static void os_unfair_lock_lock(os_unfair_lock_t lock) { pthread_mutex_lock(lock); }
+ static void os_unfair_lock_lock_with_options(os_unfair_lock_t lock, os_unfair_lock_options_t options) { pthread_mutex_lock(lock); }
+ static void os_unfair_lock_unlock(os_unfair_lock_t lock) { pthread_mutex_unlock(lock); }
+-#elif defined(_WIN32) || TARGET_OS_WASI
++#elif defined(_WIN32) || TARGET_OS_WASM
+ #define OS_UNFAIR_LOCK_INIT CFLockInit
+ #define os_unfair_lock CFLock_t
+ #define os_unfair_lock_lock __CFLock
+@@ -1323,7 +1323,7 @@ CF_INLINE uint64_t _CFUnalignedLoad64BE(const void *ptr) {
+ 
+ // MARK: - Atomics
+ 
+-#if TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WIN32 || TARGET_OS_WASI
++#if TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WIN32 || TARGET_OS_WASM
+ // Implemented in CFPlatform.c
+ CF_EXPORT bool OSAtomicCompareAndSwapPtr(void *oldp, void *newp, void *volatile *dst);
+ CF_EXPORT bool OSAtomicCompareAndSwapLong(long oldl, long newl, long volatile *dst);
+diff --git a/Sources/CoreFoundation/internalInclude/CoreFoundation_Prefix.h b/Sources/CoreFoundation/internalInclude/CoreFoundation_Prefix.h
+index 1cbefad2..22369aa6 100644
+--- a/Sources/CoreFoundation/internalInclude/CoreFoundation_Prefix.h
++++ b/Sources/CoreFoundation/internalInclude/CoreFoundation_Prefix.h
+@@ -17,7 +17,7 @@
+ #include "CFTargetConditionals.h"
+ #include "CFAvailability.h"
+ 
+-#if TARGET_OS_WASI
++#if TARGET_OS_WASM
+ #define __HAS_DISPATCH__ 0
+ #else
+ #define __HAS_DISPATCH__ 1
+@@ -36,8 +36,8 @@
+ #ifndef TARGET_OS_CYGWIN
+ #define TARGET_OS_CYGWIN 0
+ #endif
+-#ifndef TARGET_OS_WASI
+-#define TARGET_OS_WASI 0
++#ifndef TARGET_OS_WASM
++#define TARGET_OS_WASM 0
+ #endif
+ #ifndef TARGET_OS_MAC
+ #define TARGET_OS_MAC 0
+@@ -200,7 +200,7 @@ static dispatch_queue_t __ ## PREFIX ## Queue(void) {			\
+ #endif
+ 
+ // We know some things (Darwin, WASI, Glibc >= 2.38) have strlcpy/strlcat
+-#if TARGET_OS_MAC || TARGET_OS_WASI || TARGET_OS_ANDROID \
++#if TARGET_OS_MAC || TARGET_OS_WASM || TARGET_OS_ANDROID \
+   || (defined(__GLIBC__) &&                              \
+       ((__GLIBC_MAJOR__ == 2 && __GLIBC_MINOR__ >= 38)   \
+        || __GLIBC_MAJOR__ > 2))
+@@ -256,7 +256,7 @@ typedef int		boolean_t;
+ #include <sys/stat.h> // mode_t
+ #endif
+ 
+-#if TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WIN32 || TARGET_OS_WASI
++#if TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WIN32 || TARGET_OS_WASM
+ 
+ #include <time.h>
+ 
+@@ -265,7 +265,7 @@ CF_INLINE uint64_t mach_absolute_time() {
+     ULONGLONG ullTime;
+ 	QueryUnbiasedInterruptTimePrecise(&ullTime);
+     return ullTime;
+-#elif TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_MAC || TARGET_OS_WASI
++#elif TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_MAC || TARGET_OS_WASM
+     struct timespec ts;
+     clock_gettime(CLOCK_MONOTONIC, &ts);
+     return (uint64_t)ts.tv_nsec + (uint64_t)ts.tv_sec * 1000000000UL;
+@@ -273,9 +273,9 @@ CF_INLINE uint64_t mach_absolute_time() {
+ }
+ 
+ #define malloc_default_zone() (void *)0
+-#endif // TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WIN32 || TARGET_OS_WASI
++#endif // TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WIN32 || TARGET_OS_WASM
+ 
+-#if TARGET_OS_LINUX || TARGET_OS_WIN32 || defined(__OpenBSD__) || TARGET_OS_WASI
++#if TARGET_OS_LINUX || TARGET_OS_WIN32 || defined(__OpenBSD__) || TARGET_OS_WASM
+ #define strtod_l(a,b,locale) strtod(a,b)
+ #define strtoul_l(a,b,c,locale) strtoul(a,b,c)
+ #define strtol_l(a,b,c,locale) strtol(a,b,c)
+@@ -290,9 +290,9 @@ CF_INLINE int flsl( long mask ) {
+     }
+     return idx;
+ }
+-#endif // TARGET_OS_LINUX || TARGET_OS_WIN32 || defined(__OpenBSD__) || TARGET_OS_WASI
++#endif // TARGET_OS_LINUX || TARGET_OS_WIN32 || defined(__OpenBSD__) || TARGET_OS_WASM
+ 
+-#if TARGET_OS_LINUX || TARGET_OS_WASI
++#if TARGET_OS_LINUX || TARGET_OS_WASM
+     
+ #define CF_PRIVATE extern __attribute__((visibility("hidden")))
+ #define __weak
+@@ -300,7 +300,7 @@ CF_INLINE int flsl( long mask ) {
+ #define strtoll_l(a,b,c,locale) strtoll(a,b,c)
+ #define strncasecmp_l(a, b, c, d) strncasecmp(a, b, c)
+ 
+-#if !TARGET_OS_WASI
++#if !TARGET_OS_WASM
+ #include <pthread.h>
+ #endif
+ 
+@@ -345,7 +345,7 @@ CF_INLINE size_t malloc_size(void *memblock) {
+ #endif
+ #endif
+ 
+-#if TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#if TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ #include <sys/param.h>
+ #endif
+ #if TARGET_OS_WIN32 || TARGET_OS_LINUX
+diff --git a/Sources/CoreFoundation/uuid.c b/Sources/CoreFoundation/uuid.c
+index 4fb31a2c..6aca00c6 100644
+--- a/Sources/CoreFoundation/uuid.c
++++ b/Sources/CoreFoundation/uuid.c
+@@ -61,7 +61,7 @@ static inline void nanotime(struct timespec *tv) {
+     tv->tv_nsec = now - (tv->tv_sec * 1000000000);
+ }
+ 
+-#elif TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
++#elif TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASM
+ #include <time.h>
+ 
+ static inline void nanotime(struct timespec *tv) {
+@@ -88,7 +88,7 @@ static inline void read_random(void *buffer, unsigned numBytes) {
+     BCryptGenRandom(NULL, buffer, numBytes,
+                     BCRYPT_RNG_USE_ENTROPY_IN_BUFFER | BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+ }
+-#elif TARGET_OS_WASI
++#elif TARGET_OS_WASM
+ #include <sys/random.h>
+ 
+ static inline void read_random(void *buffer, unsigned numBytes) {
+diff --git a/Sources/Foundation/CharacterSet.swift b/Sources/Foundation/CharacterSet.swift
+index b8e105ab..2d1998b1 100644
+--- a/Sources/Foundation/CharacterSet.swift
++++ b/Sources/Foundation/CharacterSet.swift
+@@ -70,7 +70,7 @@ public struct CharacterSet : ReferenceConvertible, Equatable, Hashable, SetAlgeb
+         _wrapped = NSCharacterSet(bitmapRepresentation: data)
+     }
+     
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+     /// Initialize with the contents of a file.
+     ///
+     /// Returns `nil` if there was an error reading the file.
+diff --git a/Sources/Foundation/FileHandle.swift b/Sources/Foundation/FileHandle.swift
+index 191348df..0bab6476 100644
+--- a/Sources/Foundation/FileHandle.swift
++++ b/Sources/Foundation/FileHandle.swift
+@@ -24,13 +24,22 @@ fileprivate let _close = Darwin.close(_:)
+ fileprivate let _read = Glibc.read(_:_:_:)
+ fileprivate let _write = Glibc.write(_:_:_:)
+ fileprivate let _close = Glibc.close(_:)
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
++fileprivate let _read = EmscriptenLibc.read(_:_:_:)
++fileprivate let _write = EmscriptenLibc.write(_:_:_:)
++fileprivate let _close = EmscriptenLibc.close(_:)
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ fileprivate let _read = Musl.read(_:_:_:)
+ fileprivate let _write = Musl.write(_:_:_:)
+ fileprivate let _close = Musl.close(_:)
+ #elseif canImport(WASILibc)
++#if os(Emscripten)
++import EmscriptenLibc
++#else
+ import WASILibc
++#endif
+ fileprivate let _read = WASILibc.read(_:_:_:)
+ fileprivate let _write = WASILibc.write(_:_:_:)
+ fileprivate let _close = WASILibc.close(_:)
+@@ -1074,7 +1083,7 @@ open class Pipe: NSObject, @unchecked Sendable {
+                                                closeOnDealloc: true)
+         self.fileHandleForWriting = FileHandle(handle: hWritePipe!,
+                                                closeOnDealloc: true)
+-#elseif os(WASI)
++#elseif (os(WASI) || os(Emscripten))
+         NSUnsupported()
+ #else
+         /// the `pipe` system call creates two `fd` in a malloc'ed area
+diff --git a/Sources/Foundation/FileManager+POSIX.swift b/Sources/Foundation/FileManager+POSIX.swift
+index c16f9b39..e6058912 100644
+--- a/Sources/Foundation/FileManager+POSIX.swift
++++ b/Sources/Foundation/FileManager+POSIX.swift
+@@ -20,8 +20,12 @@ internal func &(left: UInt32, right: mode_t) -> mode_t {
+ @_implementationOnly import CoreFoundation
+ internal import Synchronization
+ 
+-#if os(WASI)
++#if (os(WASI) || os(Emscripten))
++#if os(Emscripten)
++import EmscriptenLibc
++#else
+ import WASILibc
++#endif
+ // wasi-libc defines the following constants in a way that Clang Importer can't
+ // understand, so we need to grab them manually through ForSwiftFoundationOnly.h
+ internal var DT_DIR: UInt8 { _getConst_DT_DIR() }
+@@ -119,6 +123,8 @@ extension FileManager {
+                 return nil
+             }
+             urls = mountPoints(statBuf, Int(fsCount))
++#elseif os(Emscripten)
++        return nil
+ #elseif os(WASI)
+         // Skip the first three file descriptors, which are reserved for stdin, stdout, and stderr.
+         var fd: __wasi_fd_t = 3
+@@ -152,9 +158,9 @@ extension FileManager {
+     }
+     
+     internal func _attributesOfFileSystemIncludingBlockSize(forPath path: String) throws -> (attributes: [FileAttributeKey : Any], blockSize: UInt64?) {
+-    #if os(WASI)
++    #if (os(WASI) || os(Emscripten))
+         // WASI doesn't have statvfs
+-        throw _NSErrorWithErrno(ENOTSUP, reading: true, path: path)
++        throw _NSErrorWithErrno(EmscriptenLibc.ENOTSUP, reading: true, path: path)
+     #else
+         var result: [FileAttributeKey:Any] = [:]
+         var finalBlockSize: UInt64?
+@@ -188,14 +194,14 @@ extension FileManager {
+             finalBlockSize = blockSize
+         }
+         return (attributes: result, blockSize: finalBlockSize)
+-    #endif // os(WASI)
++    #endif // (os(WASI) || os(Emscripten))
+     }
+         
+     internal func _recursiveDestinationOfSymbolicLink(atPath path: String) throws -> String {
+-        #if os(WASI)
++        #if (os(WASI) || os(Emscripten))
+         // TODO: Remove this guard when realpath implementation will be released
+         // See https://github.com/WebAssembly/wasi-libc/pull/473
+-        throw _NSErrorWithErrno(ENOTSUP, reading: true, path: path)
++        throw _NSErrorWithErrno(EmscriptenLibc.ENOTSUP, reading: true, path: path)
+         #else
+         // Throw error if path is not a symbolic link:
+         let path = try destinationOfSymbolicLink(atPath: path)
+@@ -215,10 +221,10 @@ extension FileManager {
+ 
+     /* Returns a String with a canonicalized path for the element at the specified path. */
+     internal func _canonicalizedPath(toFileAtPath path: String) throws -> String {
+-        #if os(WASI)
++        #if (os(WASI) || os(Emscripten))
+         // TODO: Remove this guard when realpath implementation will be released
+         // See https://github.com/WebAssembly/wasi-libc/pull/473
+-        throw _NSErrorWithErrno(ENOTSUP, reading: true, path: path)
++        throw _NSErrorWithErrno(EmscriptenLibc.ENOTSUP, reading: true, path: path)
+         #else
+         let bufSize = Int(PATH_MAX + 1)
+         var buf = [Int8](repeating: 0, count: bufSize)
+@@ -311,7 +317,7 @@ extension FileManager {
+         return temp._bridgeToObjectiveC().appendingPathComponent(dest)
+     }
+ 
+-    #if os(WASI)
++    #if (os(WASI) || os(Emscripten))
+     // For platforms that don't support FTS, we just throw an error for now.
+     // TODO: Provide readdir(2) based implementation here or FTS in wasi-libc?
+     internal class NSURLDirectoryEnumerator : DirectoryEnumerator {
+@@ -325,7 +331,7 @@ extension FileManager {
+ 
+         override func nextObject() -> Any? {
+             if let handler = _errorHandler {
+-                _ = handler(_url, _NSErrorWithErrno(ENOTSUP, reading: true, url: _url))
++                _ = handler(_url, _NSErrorWithErrno(EmscriptenLibc.ENOTSUP, reading: true, url: _url))
+             }
+             return nil
+         }
+@@ -527,7 +533,7 @@ extension FileManager {
+                     }
+                 }
+                 
+-                if let finalErrno = finalErrno, finalErrno != ENOTSUP {
++                if let finalErrno = finalErrno, finalErrno != EmscriptenLibc.ENOTSUP {
+                     throw _NSErrorWithErrno(finalErrno, reading: false, url: originalItemURL)
+                 } else if finalErrno == nil {
+                     try applyPostprocessingRequiredByOptions()
+diff --git a/Sources/Foundation/FileManager.swift b/Sources/Foundation/FileManager.swift
+index f5dd4335..9d7323db 100644
+--- a/Sources/Foundation/FileManager.swift
++++ b/Sources/Foundation/FileManager.swift
+@@ -19,8 +19,12 @@ import CRT
+ import WinSDK
+ #endif
+ 
+-#if os(WASI)
++#if (os(WASI) || os(Emscripten))
++#if os(Emscripten)
++import EmscriptenLibc
++#else
+ import WASILibc
++#endif
+ #elseif canImport(Bionic)
+ @preconcurrency import Bionic
+ #endif
+diff --git a/Sources/Foundation/Host.swift b/Sources/Foundation/Host.swift
+index 1a4aeb41..f7a57606 100644
+--- a/Sources/Foundation/Host.swift
++++ b/Sources/Foundation/Host.swift
+@@ -95,7 +95,7 @@ open class Host: NSObject {
+             return "localhost"
+         }
+         return String(cString: hostname)
+-#elseif os(WASI) // WASI does not have uname
++#elseif (os(WASI) || os(Emscripten)) // WASI does not have uname
+         return "localhost"
+ #else
+         let hname = UnsafeMutablePointer<Int8>.allocate(capacity: Int(NI_MAXHOST))
+@@ -176,7 +176,7 @@ open class Host: NSObject {
+         }
+         _names = [info]
+         _resolved = true
+-#elseif os(WASI) // WASI does not have getifaddrs
++#elseif (os(WASI) || os(Emscripten)) // WASI does not have getifaddrs
+         _names = [info]
+         _resolved = true
+ #else
+@@ -276,7 +276,7 @@ open class Host: NSObject {
+ 
+           _resolved = true
+         }
+-#elseif os(WASI) // WASI does not have getaddrinfo
++#elseif (os(WASI) || os(Emscripten)) // WASI does not have getaddrinfo
+         if let info = _info {
+             _names = [info]
+             _resolved = true
+diff --git a/Sources/Foundation/JSONSerialization.swift b/Sources/Foundation/JSONSerialization.swift
+index 7e2674cc..8585be69 100644
+--- a/Sources/Foundation/JSONSerialization.swift
++++ b/Sources/Foundation/JSONSerialization.swift
+@@ -274,7 +274,7 @@ open class JSONSerialization : NSObject {
+         
+     }
+     
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+     /* Write JSON data into a stream. The stream should be opened and configured. The return value is the number of bytes written to the stream, or 0 on error. All other behavior of this method is the same as the dataWithJSONObject:options:error: method.
+      */
+     open class func writeJSONObject(_ obj: Any, toStream stream: OutputStream, options opt: WritingOptions) throws -> Int {
+diff --git a/Sources/Foundation/NSArray.swift b/Sources/Foundation/NSArray.swift
+index 5d4699e3..dba6d426 100644
+--- a/Sources/Foundation/NSArray.swift
++++ b/Sources/Foundation/NSArray.swift
+@@ -446,7 +446,7 @@ open class NSArray : NSObject, NSCopying, NSMutableCopying, NSSecureCoding, NSCo
+         return objects
+     }
+ 
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+     open func write(to url: URL) throws {
+         let pListData = try PropertyListSerialization.data(fromPropertyList: self, format: .xml, options: 0)
+         try pListData.write(to: url, options: .atomic)
+@@ -661,7 +661,7 @@ open class NSArray : NSObject, NSCopying, NSMutableCopying, NSSecureCoding, NSCo
+         return lastEqual ? result + 1 : result
+     }
+ 
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+     public convenience init(contentsOf url: URL, error: ()) throws {
+         let plistDoc = try Data(contentsOf: url)
+         guard let plistArray = try PropertyListSerialization.propertyList(from: plistDoc, options: [], format: nil) as? Array<Any>
+diff --git a/Sources/Foundation/NSCalendar.swift b/Sources/Foundation/NSCalendar.swift
+index 465912e6..4952d752 100644
+--- a/Sources/Foundation/NSCalendar.swift
++++ b/Sources/Foundation/NSCalendar.swift
+@@ -866,7 +866,7 @@ open class NSCalendar : NSObject, NSCopying, NSSecureCoding {
+     
+ }
+ 
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+ // This notification is posted through [NSNotificationCenter defaultCenter]
+ // when the system day changes. Register with "nil" as the object of this
+ // notification. If the computer/device is asleep when the day changed,
+diff --git a/Sources/Foundation/NSData.swift b/Sources/Foundation/NSData.swift
+index 46bf5a11..b3f0f573 100644
+--- a/Sources/Foundation/NSData.swift
++++ b/Sources/Foundation/NSData.swift
+@@ -8,7 +8,7 @@
+ //
+ 
+ @_implementationOnly import CoreFoundation
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+ import Dispatch
+ #endif
+ #if canImport(Android)
+@@ -272,7 +272,7 @@ open class NSData : NSObject, NSCopying, NSMutableCopying, NSSecureCoding {
+             return isEqual(to: data._swiftObject)
+         }
+ 
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+         if let data = value as? DispatchData {
+             if data.count != length {
+                 return false
+@@ -430,7 +430,7 @@ open class NSData : NSObject, NSCopying, NSMutableCopying, NSSecureCoding {
+         }
+ 
+         let fm = FileManager.default
+-#if os(WASI)
++#if (os(WASI) || os(Emscripten))
+         // WASI does not have permission concept
+         let permissions: Int? = nil
+         // ReadingOptions.atomic won't be specified on WASI as it's marked unavailable
+@@ -471,6 +471,8 @@ open class NSData : NSObject, NSCopying, NSMutableCopying, NSSecureCoding {
+             let createMode = Int(S_IRUSR) | Int(S_IWUSR) | Int(S_IRGRP) | Int(S_IWGRP) | Int(S_IROTH) | Int(S_IWOTH)
+ #elseif canImport(Glibc)
+             let createMode = Int(Glibc.S_IRUSR) | Int(Glibc.S_IWUSR) | Int(Glibc.S_IRGRP) | Int(Glibc.S_IWGRP) | Int(Glibc.S_IROTH) | Int(Glibc.S_IWOTH)
++#elseif canImport(EmscriptenLibc)
++            let createMode = Int(EmscriptenLibc.S_IRUSR) | Int(EmscriptenLibc.S_IWUSR) | Int(EmscriptenLibc.S_IRGRP) | Int(EmscriptenLibc.S_IWGRP) | Int(EmscriptenLibc.S_IROTH) | Int(EmscriptenLibc.S_IWOTH)
+ #elseif canImport(Musl)
+             let createMode = Int(Musl.S_IRUSR) | Int(Musl.S_IWUSR) | Int(Musl.S_IRGRP) | Int(Musl.S_IWGRP) | Int(Musl.S_IROTH) | Int(Musl.S_IWOTH)
+ #elseif canImport(WASILibc)
+@@ -490,11 +492,11 @@ open class NSData : NSObject, NSCopying, NSMutableCopying, NSSecureCoding {
+ 
+     /// Writes the data object's bytes to the file specified by a given path.
+     /// NOTE: the 'atomically' flag is ignored if the url is not of a type the supports atomic writes
+-    #if os(WASI)
++    #if (os(WASI) || os(Emscripten))
+     @available(*, unavailable, message: "WASI does not support atomic file-writing as it does not have temporary directories")
+     #endif
+     open func write(toFile path: String, atomically useAuxiliaryFile: Bool) -> Bool {
+-        #if os(WASI)
++        #if (os(WASI) || os(Emscripten))
+         // WASI does not support atomic file-writing as it does not have temporary directories
+         return false
+         #else
+@@ -509,11 +511,11 @@ open class NSData : NSObject, NSCopying, NSMutableCopying, NSSecureCoding {
+ 
+     /// Writes the data object's bytes to the location specified by a given URL.
+     /// NOTE: the 'atomically' flag is ignored if the url is not of a type the supports atomic writes
+-    #if os(WASI)
++    #if (os(WASI) || os(Emscripten))
+     @available(*, unavailable, message: "WASI does not support atomic file-writing as it does not have temporary directories")
+     #endif
+     open func write(to url: URL, atomically: Bool) -> Bool {
+-        #if os(WASI)
++        #if (os(WASI) || os(Emscripten))
+         // WASI does not support atomic file-writing as it does not have temporary directories
+         return false
+         #else
+diff --git a/Sources/Foundation/NSDictionary.swift b/Sources/Foundation/NSDictionary.swift
+index 5cf7a45f..568e2537 100644
+--- a/Sources/Foundation/NSDictionary.swift
++++ b/Sources/Foundation/NSDictionary.swift
+@@ -10,7 +10,7 @@
+ 
+ @_implementationOnly import CoreFoundation
+ 
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+ import Dispatch
+ #endif
+ 
+@@ -78,7 +78,7 @@ open class NSDictionary : NSObject, NSCopying, NSMutableCopying, NSSecureCoding,
+         return NSGeneratorEnumerator(_storage.keys.map { __SwiftValue.fetch(nonOptional: $0) }.makeIterator())
+     }
+     
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+     @available(*, deprecated)
+     public convenience init?(contentsOfFile path: String) {
+         self.init(contentsOf: URL(fileURLWithPath: path))
+@@ -505,7 +505,7 @@ open class NSDictionary : NSObject, NSCopying, NSMutableCopying, NSSecureCoding,
+         return objects
+     }
+     
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+     open func write(toFile path: String, atomically useAuxiliaryFile: Bool) -> Bool {
+         return write(to: URL(fileURLWithPath: path), atomically: useAuxiliaryFile)
+     }
+diff --git a/Sources/Foundation/NSIndexSet.swift b/Sources/Foundation/NSIndexSet.swift
+index 80458c93..8b4cf8ba 100644
+--- a/Sources/Foundation/NSIndexSet.swift
++++ b/Sources/Foundation/NSIndexSet.swift
+@@ -7,7 +7,7 @@
+ // See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+ //
+ 
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+ import Dispatch
+ #endif
+ 
+diff --git a/Sources/Foundation/NSKeyedUnarchiver.swift b/Sources/Foundation/NSKeyedUnarchiver.swift
+index cf7f0fe3..fcd13030 100644
+--- a/Sources/Foundation/NSKeyedUnarchiver.swift
++++ b/Sources/Foundation/NSKeyedUnarchiver.swift
+@@ -54,7 +54,7 @@ open class NSKeyedUnarchiver : NSCoder {
+     
+     private enum Stream {
+         case data(Data)
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+         case stream(CFReadStream)
+ #endif
+     }
+@@ -96,7 +96,7 @@ open class NSKeyedUnarchiver : NSCoder {
+         return try? unarchiveTopLevelObjectWithData(data)
+     }
+     
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+     @available(swift, deprecated: 9999, renamed: "unarchivedObject(ofClass:from:)")
+     open class func unarchiveObject(withFile path: String) -> Any? {
+         let url = URL(fileURLWithPath: path)
+@@ -150,7 +150,7 @@ open class NSKeyedUnarchiver : NSCoder {
+         switch self._stream {
+         case .data(let data):
+             try plist = PropertyListSerialization.propertyList(from: data, options: [], format: &format)
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+         case .stream(let readStream):
+             try plist = PropertyListSerialization.propertyList(with: readStream, options: [], format: &format)
+ #endif
+diff --git a/Sources/Foundation/NSLocale.swift b/Sources/Foundation/NSLocale.swift
+index 10db7897..f9d3624d 100644
+--- a/Sources/Foundation/NSLocale.swift
++++ b/Sources/Foundation/NSLocale.swift
+@@ -375,7 +375,7 @@ extension NSLocale {
+ }
+ 
+ 
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+ extension NSLocale {
+     public static let currentLocaleDidChangeNotification = NSNotification.Name(rawValue: "kCFLocaleCurrentLocaleDidChangeNotification")
+ }
+diff --git a/Sources/Foundation/NSObjCRuntime.swift b/Sources/Foundation/NSObjCRuntime.swift
+index 95d939b8..e32aa1a4 100644
+--- a/Sources/Foundation/NSObjCRuntime.swift
++++ b/Sources/Foundation/NSObjCRuntime.swift
+@@ -310,10 +310,10 @@ internal let _NSClassesRenamedByObjCAPINotes: [(class: AnyClass, objCName: Strin
+         (UnitVolume.self, "NSUnitVolume"),
+         (UnitTemperature.self, "NSUnitTemperature"),
+     ]
+-#if !(os(iOS) || os(Android) || os(WASI))
++#if !(os(iOS) || os(Android) || (os(WASI) || os(Emscripten)))
+     map.append((Process.self, "NSTask"))
+ #endif
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+     map += [
+         (NotificationQueue.self, "NSNotificationQueue"),
+         (Operation.self, "NSOperation"),
+diff --git a/Sources/Foundation/NSObject.swift b/Sources/Foundation/NSObject.swift
+index e96564cb..1036b97c 100644
+--- a/Sources/Foundation/NSObject.swift
++++ b/Sources/Foundation/NSObject.swift
+@@ -10,7 +10,7 @@
+ // @_exported import of Dispatch here makes it available to all
+ // classes in Foundation and all sources that import Foundation.
+ // This brings it into line with Darwin usage for compatibility.
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+ @_exported import Dispatch
+ #endif
+ 
+diff --git a/Sources/Foundation/NSPathUtilities.swift b/Sources/Foundation/NSPathUtilities.swift
+index 0c1c163a..b7ce7c9c 100644
+--- a/Sources/Foundation/NSPathUtilities.swift
++++ b/Sources/Foundation/NSPathUtilities.swift
+@@ -12,9 +12,13 @@
+ import WinSDK
+ #elseif canImport(Android)
+ @preconcurrency import Android
+-#elseif os(WASI)
++#elseif (os(WASI) || os(Emscripten))
++#if os(Emscripten)
++import EmscriptenLibc
++#else
+ import WASILibc
+ #endif
++#endif
+ 
+ #if os(Windows)
+ let validPathSeps: [Character] = ["\\", "/"]
+@@ -661,9 +665,9 @@ internal func _NSCreateTemporaryFile(_ filePath: String) throws -> (Int32, Strin
+     // Don't close h, fd is transferred ownership
+     let fd = _open_osfhandle(intptr_t(bitPattern: h), 0)
+     return (fd, pathResult)
+-#elseif os(WASI)
++#elseif (os(WASI) || os(Emscripten))
+     // WASI does not have temp directories
+-    throw NSError(domain: NSPOSIXErrorDomain, code: Int(ENOTSUP))
++    throw NSError(domain: NSPOSIXErrorDomain, code: Int(EmscriptenLibc.ENOTSUP))
+ #else
+     var template = URL(fileURLWithPath: filePath)
+     
+diff --git a/Sources/Foundation/NSPlatform.swift b/Sources/Foundation/NSPlatform.swift
+index 522375be..1985aa9f 100644
+--- a/Sources/Foundation/NSPlatform.swift
++++ b/Sources/Foundation/NSPlatform.swift
+@@ -22,7 +22,7 @@ fileprivate var _NSPageSize: Int {
+   GetSystemInfo(&siInfo)
+   return Int(siInfo.dwPageSize)
+ }
+-#elseif os(WASI)
++#elseif (os(WASI) || os(Emscripten))
+ // WebAssembly defines a fixed page size
+ fileprivate let _NSPageSize: Int = 65_536
+ #endif
+diff --git a/Sources/Foundation/NSString.swift b/Sources/Foundation/NSString.swift
+index 828ad58c..8352f125 100644
+--- a/Sources/Foundation/NSString.swift
++++ b/Sources/Foundation/NSString.swift
+@@ -1266,11 +1266,8 @@ extension NSString {
+         data = mData
+     }
+     
+-    #if os(WASI)
+-    @available(*, unavailable, message: "WASI does not support atomic file-writing as it does not have temporary directories")
+-    #endif
+     internal func _writeTo(_ url: URL, _ useAuxiliaryFile: Bool, _ enc: UInt) throws {
+-        #if os(WASI)
++        #if (os(WASI) || os(Emscripten))
+         throw CocoaError(.featureUnsupported)
+         #else
+         var data = Data()
+@@ -1279,14 +1276,14 @@ extension NSString {
+         #endif
+     }
+     
+-    #if os(WASI)
++    #if (os(WASI) || os(Emscripten))
+     @available(*, unavailable, message: "WASI does not support atomic file-writing as it does not have temporary directories")
+     #endif
+     public func write(to url: URL, atomically useAuxiliaryFile: Bool, encoding enc: UInt) throws {
+         try _writeTo(url, useAuxiliaryFile, enc)
+     }
+     
+-    #if os(WASI)
++    #if (os(WASI) || os(Emscripten))
+     @available(*, unavailable, message: "WASI does not support atomic file-writing as it does not have temporary directories")
+     #endif
+     public func write(toFile path: String, atomically useAuxiliaryFile: Bool, encoding enc: UInt) throws {
+diff --git a/Sources/Foundation/NSSwiftRuntime.swift b/Sources/Foundation/NSSwiftRuntime.swift
+index 1276a03b..74a5a739 100644
+--- a/Sources/Foundation/NSSwiftRuntime.swift
++++ b/Sources/Foundation/NSSwiftRuntime.swift
+@@ -17,17 +17,23 @@ internal import Synchronization
+ @_exported import Darwin
+ #elseif canImport(Glibc)
+ @_exported @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@_exported @preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @_exported @preconcurrency import Musl
+ #elseif canImport(Bionic)
+ @_exported @preconcurrency import Bionic
+-#elseif os(WASI)
+-@_exported import WASILibc
++#elseif (os(WASI) || os(Emscripten))
++#if os(Emscripten)
++import EmscriptenLibc
++#else
++import WASILibc
++#endif
+ #elseif os(Windows)
+ @_exported import CRT
+ #endif
+ 
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+ @_exported import Dispatch
+ #endif
+ 
+@@ -267,7 +273,7 @@ internal func __CFInitializeSwift() {
+     __CFSwiftBridge.NSMutableString.appendCharacters = _CFSwiftStringAppendCharacters
+     __CFSwiftBridge.NSMutableString._cfAppendCString = _CFSwiftStringAppendCString
+ 
+-#if !os(WASI)    
++#if !(os(WASI) || os(Emscripten))    
+     __CFSwiftBridge.NSRunLoop._new = _NSRunLoopNew
+ #endif
+     
+@@ -303,7 +309,7 @@ internal func __CFInitializeSwift() {
+         
+ //    __CFDefaultEightBitStringEncoding = UInt32(kCFStringEncodingUTF8)
+     
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+     __CFSwiftBridge.NSURL.copyResourcePropertyForKey = _CFSwiftURLCopyResourcePropertyForKey
+     __CFSwiftBridge.NSURL.copyResourcePropertiesForKeys = _CFSwiftURLCopyResourcePropertiesForKeys
+     __CFSwiftBridge.NSURL.setResourcePropertyForKey = _CFSwiftURLSetResourcePropertyForKey
+diff --git a/Sources/Foundation/NSURL.swift b/Sources/Foundation/NSURL.swift
+index 88f6cd11..772766a4 100644
+--- a/Sources/Foundation/NSURL.swift
++++ b/Sources/Foundation/NSURL.swift
+@@ -20,6 +20,8 @@ internal let kCFURLWindowsPathStyle = CFURLPathStyle.cfurlWindowsPathStyle
+ import Darwin
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif canImport(Bionic)
+@@ -213,7 +215,7 @@ open class NSURL : NSObject, NSSecureCoding, NSCopying, @unchecked Sendable {
+         if validPathSeps.contains(where: { thePath.hasSuffix(String($0)) }) {
+             isDir = true
+         } else {
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+             let absolutePath: String
+             if let absPath = baseURL?.appendingPathComponent(path).path {
+                 absolutePath = absPath
+@@ -239,7 +241,7 @@ open class NSURL : NSObject, NSSecureCoding, NSCopying, @unchecked Sendable {
+         if validPathSeps.contains(where: { thePath.hasSuffix(String($0)) }) {
+             isDir = true
+         } else {
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+             if !FileManager.default.fileExists(atPath: path, isDirectory: &isDir) {
+                 isDir = false
+             }
+@@ -862,7 +864,7 @@ extension NSURL {
+         var result : URL? = appendingPathComponent(pathComponent, isDirectory: false)
+ 
+         // File URLs can't be handled on WASI without file system access
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+         // Since we are appending to a URL, path separators should
+         // always be '/', even if we're on Windows
+         if !pathComponent.hasSuffix("/") && isFileURL {
+diff --git a/Sources/Foundation/Port.swift b/Sources/Foundation/Port.swift
+index 7dc582b3..46b87da8 100644
+--- a/Sources/Foundation/Port.swift
++++ b/Sources/Foundation/Port.swift
+@@ -91,7 +91,7 @@ public protocol PortDelegate: AnyObject {
+     func handle(_ message: PortMessage)
+ }
+ 
+-#if os(WASI)
++#if (os(WASI) || os(Emscripten))
+ 
+ @available(*, unavailable, message: "SocketPort is not available on this platform.")
+ open class SocketPort: Port {}
+diff --git a/Sources/Foundation/PropertyListSerialization.swift b/Sources/Foundation/PropertyListSerialization.swift
+index 5c56c9b3..57e5fd1f 100644
+--- a/Sources/Foundation/PropertyListSerialization.swift
++++ b/Sources/Foundation/PropertyListSerialization.swift
+@@ -73,7 +73,7 @@ open class PropertyListSerialization : NSObject {
+         }
+     }
+     
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+     internal final class func propertyList(with stream: CFReadStream, options opt: ReadOptions, format: UnsafeMutablePointer <PropertyListFormat>?) throws -> Any {
+         var fmt = kCFPropertyListBinaryFormat_v1_0
+         var error: Unmanaged<CFError>? = nil
+diff --git a/Sources/Foundation/Thread.swift b/Sources/Foundation/Thread.swift
+index ac1aa0ee..2359d093 100644
+--- a/Sources/Foundation/Thread.swift
++++ b/Sources/Foundation/Thread.swift
+@@ -15,6 +15,8 @@ import WinSDK
+ 
+ #if canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif canImport(Bionic)

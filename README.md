@@ -8,6 +8,8 @@ pipeline runs locally in the browser. Try here : https://anutosh21.github.io/Was
 Start with the [tutorials](tutorials.md) for MLIR, WebAssembly, LLVM utilities,
 x86-64 and AArch64.
 They walk through commands and inspecting generated files in the browser.
+Optional Swift compilation have their own [build instructions](compilers/swift/README.md)
+and [tutorial](compilers/swift/tutorial_swift.md).
 
 Compiler and analysis modules stay available during the session. For Cloudflare
 Pages, `node scripts/package-pages.mjs site build/pages` packages compressed,

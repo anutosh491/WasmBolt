@@ -1,0 +1,1017 @@
+diff --git a/Sources/FoundationEssentials/Calendar/Calendar.swift b/Sources/FoundationEssentials/Calendar/Calendar.swift
+index b50fe04..d875a94 100644
+--- a/Sources/FoundationEssentials/Calendar/Calendar.swift
++++ b/Sources/FoundationEssentials/Calendar/Calendar.swift
+@@ -16,6 +16,8 @@ internal import os
+ @preconcurrency import Bionic
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif canImport(CRT)
+diff --git a/Sources/FoundationEssentials/Calendar/Calendar_Gregorian.swift b/Sources/FoundationEssentials/Calendar/Calendar_Gregorian.swift
+index b7809b9..cb9b90b 100644
+--- a/Sources/FoundationEssentials/Calendar/Calendar_Gregorian.swift
++++ b/Sources/FoundationEssentials/Calendar/Calendar_Gregorian.swift
+@@ -16,6 +16,8 @@ internal import os
+ @preconcurrency import Bionic
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif canImport(CRT)
+diff --git a/Sources/FoundationEssentials/Data/Data+Base64.swift b/Sources/FoundationEssentials/Data/Data+Base64.swift
+index fb0960f..c3978e9 100644
+--- a/Sources/FoundationEssentials/Data/Data+Base64.swift
++++ b/Sources/FoundationEssentials/Data/Data+Base64.swift
+@@ -16,6 +16,8 @@ import Darwin
+ import Bionic
+ #elseif canImport(Glibc)
+ import Glibc
++#elseif canImport(EmscriptenLibc)
++import EmscriptenLibc
+ #elseif canImport(Musl)
+ import Musl
+ #elseif os(Windows)
+diff --git a/Sources/FoundationEssentials/Data/Data+Reading.swift b/Sources/FoundationEssentials/Data/Data+Reading.swift
+index 7b0d444..72a1cb0 100644
+--- a/Sources/FoundationEssentials/Data/Data+Reading.swift
++++ b/Sources/FoundationEssentials/Data/Data+Reading.swift
+@@ -22,6 +22,8 @@ import Darwin
+ @preconcurrency import Android
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif os(Windows)
+diff --git a/Sources/FoundationEssentials/Data/Data+Writing.swift b/Sources/FoundationEssentials/Data/Data+Writing.swift
+index 51b54ed..48cec7e 100644
+--- a/Sources/FoundationEssentials/Data/Data+Writing.swift
++++ b/Sources/FoundationEssentials/Data/Data+Writing.swift
+@@ -26,6 +26,8 @@ import Darwin
+ import unistd
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif os(Windows)
+@@ -142,11 +144,11 @@ private func cleanupTemporaryDirectory(at inPath: String?) {
+ }
+ 
+ /// Caller is responsible for calling `close` on the `Int32` file descriptor.
+-#if os(WASI)
++#if (os(WASI) || os(Emscripten))
+ @available(*, unavailable, message: "WASI does not have temporary directories")
+ #endif
+ private func createTemporaryFile(at destinationPath: String, inPath: PathOrURL, prefix: String, options: Data.WritingOptions, variant: String? = nil) throws -> (Int32, String) {
+-#if os(WASI)
++#if (os(WASI) || os(Emscripten))
+     // WASI does not have temp directories
+     throw CocoaError(.featureUnsupported)
+ #else
+@@ -204,16 +206,16 @@ private func createTemporaryFile(at destinationPath: String, inPath: PathOrURL,
+             }
+         }
+     } while true
+-#endif // os(WASI)
++#endif // (os(WASI) || os(Emscripten))
+ }
+ 
+ /// Returns `(file descriptor, temporary file path, temporary directory path)`
+ /// Caller is responsible for calling `close` on the `Int32` file descriptor and calling `cleanupTemporaryDirectory` on the temporary directory path. The temporary directory path may be nil, if it does not need to be cleaned up.
+-#if os(WASI)
++#if (os(WASI) || os(Emscripten))
+ @available(*, unavailable, message: "WASI does not have temporary directories")
+ #endif
+ private func createProtectedTemporaryFile(at destinationPath: String, inPath: PathOrURL, options: Data.WritingOptions, variant: String? = nil) throws -> (Int32, String, String?) {
+-#if os(WASI)
++#if (os(WASI) || os(Emscripten))
+     // WASI does not have temp directories
+     throw CocoaError(.featureUnsupported)
+ #else
+@@ -258,7 +260,7 @@ private func createProtectedTemporaryFile(at destinationPath: String, inPath: Pa
+     let temporaryDirectoryPath = destinationPath.deletingLastPathComponent()
+     let (fd, auxFile) = try createTemporaryFile(at: temporaryDirectoryPath, inPath: inPath, prefix: ".dat.nosync", options: options, variant: variant)
+     return (fd, auxFile, nil)
+-#endif // os(WASI)
++#endif // (os(WASI) || os(Emscripten))
+ }
+ 
+ private func write(buffer: UnsafeRawBufferPointer, toFileDescriptor fd: Int32, path: PathOrURL, parentProgress: Progress?) throws {
+@@ -333,7 +335,7 @@ internal func writeToFile(path inPath: PathOrURL, data: Data, options: Data.Writ
+ }
+ 
+ internal func writeToFile(path inPath: PathOrURL, buffer: UnsafeRawBufferPointer, options: Data.WritingOptions, attributes: [String : Data] = [:], reportProgress: Bool = false) throws {
+-#if os(WASI) // `.atomic` is unavailable on WASI
++#if (os(WASI) || os(Emscripten)) // `.atomic` is unavailable on WASI
+     try writeToFileNoAux(path: inPath, buffer: buffer, options: options, attributes: attributes, reportProgress: reportProgress)
+ #else
+     if options.contains(.atomic) {
+@@ -345,11 +347,11 @@ internal func writeToFile(path inPath: PathOrURL, buffer: UnsafeRawBufferPointer
+ }
+ 
+ /// Create a new file out of `Data` at a path, using atomic writing.
+-#if os(WASI)
++#if (os(WASI) || os(Emscripten))
+ @available(*, unavailable, message: "atomic writing is unavailable in WASI because temporary files are not supported")
+ #endif
+ private func writeToFileAux(path inPath: PathOrURL, buffer: UnsafeRawBufferPointer, options: Data.WritingOptions, attributes: [String : Data], reportProgress: Bool) throws {
+-#if os(WASI)
++#if (os(WASI) || os(Emscripten))
+     // `.atomic` is unavailable on WASI
+     throw CocoaError(.featureUnsupported)
+ #else
+@@ -552,12 +554,12 @@ private func writeToFileAux(path inPath: PathOrURL, buffer: UnsafeRawBufferPoint
+         }
+     }
+ #endif
+-#endif // os(WASI)
++#endif // (os(WASI) || os(Emscripten))
+ }
+ 
+ /// Create a new file out of `Data` at a path, not using atomic writing.
+ private func writeToFileNoAux(path inPath: PathOrURL, buffer: UnsafeRawBufferPointer, options: Data.WritingOptions, attributes: [String : Data], reportProgress: Bool) throws {
+-#if !os(WASI) // `.atomic` is unavailable on WASI
++#if !(os(WASI) || os(Emscripten)) // `.atomic` is unavailable on WASI
+     assert(!options.contains(.atomic))
+ #endif
+ 
+diff --git a/Sources/FoundationEssentials/Data/Data.swift b/Sources/FoundationEssentials/Data/Data.swift
+index 1f68418..1ff9a2e 100644
+--- a/Sources/FoundationEssentials/Data/Data.swift
++++ b/Sources/FoundationEssentials/Data/Data.swift
+@@ -32,6 +32,14 @@
+ @usableFromInline let memset = Glibc.memset
+ @usableFromInline let memcpy = Glibc.memcpy
+ @usableFromInline let memcmp = Glibc.memcmp
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
++@usableFromInline let calloc = EmscriptenLibc.calloc
++@usableFromInline let malloc = EmscriptenLibc.malloc
++@usableFromInline let free = EmscriptenLibc.free
++@usableFromInline let memset = EmscriptenLibc.memset
++@usableFromInline let memcpy = EmscriptenLibc.memcpy
++@usableFromInline let memcmp = EmscriptenLibc.memcmp
+ #elseif canImport(Musl)
+ @usableFromInline let calloc = Musl.calloc
+ @usableFromInline let malloc = Musl.malloc
+@@ -2103,7 +2111,7 @@ public struct Data : Equatable, Hashable, RandomAccessCollection, MutableCollect
+         public init(rawValue: UInt) { self.rawValue = rawValue }
+ 
+         /// An option to write data to an auxiliary file first and then replace the original file with the auxiliary file when the write completes.
+-#if os(WASI)
++#if (os(WASI) || os(Emscripten))
+         @available(*, unavailable, message: "atomic writing is unavailable in WASI because temporary files are not supported")
+ #endif
+         public static let atomic = WritingOptions(rawValue: 1 << 0)
+@@ -2581,7 +2589,7 @@ public struct Data : Equatable, Hashable, RandomAccessCollection, MutableCollect
+     /// - parameter options: Options for writing the data. Default value is `[]`.
+     /// - throws: An error in the Cocoa domain, if there is an error writing to the `URL`.
+     public func write(to url: URL, options: Data.WritingOptions = []) throws {
+-#if !os(WASI) // `.atomic` is unavailable on WASI
++#if !(os(WASI) || os(Emscripten)) // `.atomic` is unavailable on WASI
+         if options.contains(.withoutOverwriting) && options.contains(.atomic) {
+             fatalError("withoutOverwriting is not supported with atomic")
+         }
+diff --git a/Sources/FoundationEssentials/Data/DataProtocol.swift b/Sources/FoundationEssentials/Data/DataProtocol.swift
+index 2f3667a..a04487f 100644
+--- a/Sources/FoundationEssentials/Data/DataProtocol.swift
++++ b/Sources/FoundationEssentials/Data/DataProtocol.swift
+@@ -14,6 +14,8 @@
+ import Darwin
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif canImport(ucrt)
+diff --git a/Sources/FoundationEssentials/Date.swift b/Sources/FoundationEssentials/Date.swift
+index 4db2a73..86272eb 100644
+--- a/Sources/FoundationEssentials/Date.swift
++++ b/Sources/FoundationEssentials/Date.swift
+@@ -16,6 +16,8 @@ import Darwin
+ @preconcurrency import Bionic
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif canImport(WinSDK)
+diff --git a/Sources/FoundationEssentials/Decimal/Decimal+Math.swift b/Sources/FoundationEssentials/Decimal/Decimal+Math.swift
+index 32e6835..cfa2aa8 100644
+--- a/Sources/FoundationEssentials/Decimal/Decimal+Math.swift
++++ b/Sources/FoundationEssentials/Decimal/Decimal+Math.swift
+@@ -16,6 +16,8 @@ import Darwin
+ @preconcurrency import Bionic
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif canImport(CRT)
+diff --git a/Sources/FoundationEssentials/Error/CocoaError+FilePath.swift b/Sources/FoundationEssentials/Error/CocoaError+FilePath.swift
+index 5dc64f8..cdd5404 100644
+--- a/Sources/FoundationEssentials/Error/CocoaError+FilePath.swift
++++ b/Sources/FoundationEssentials/Error/CocoaError+FilePath.swift
+@@ -19,6 +19,8 @@ import Darwin
+ @preconcurrency import Android
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif os(Windows)
+diff --git a/Sources/FoundationEssentials/Error/ErrorCodes+POSIX.swift b/Sources/FoundationEssentials/Error/ErrorCodes+POSIX.swift
+index 0d178f2..947c3a6 100644
+--- a/Sources/FoundationEssentials/Error/ErrorCodes+POSIX.swift
++++ b/Sources/FoundationEssentials/Error/ErrorCodes+POSIX.swift
+@@ -14,6 +14,8 @@
+ @preconcurrency import Android
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc 
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif canImport(Darwin)
+@@ -141,7 +143,7 @@ extension POSIXError {
+         return .EFAULT
+     }
+ 
+-    #if !os(Windows) && !os(WASI)
++    #if !os(Windows) && !(os(WASI) || os(Emscripten))
+     /// Block device required.
+     public static var ENOTBLK: POSIXErrorCode {
+         return .ENOTBLK
+@@ -304,7 +306,7 @@ extension POSIXError {
+         return .EPROTONOSUPPORT
+     }
+ 
+-    #if !os(WASI)
++    #if !(os(WASI) || os(Emscripten))
+     /// Socket type not supported.
+     public static var ESOCKTNOSUPPORT: POSIXErrorCode {
+         return .ESOCKTNOSUPPORT
+@@ -320,7 +322,7 @@ extension POSIXError {
+     #endif
+ 
+     #if !os(Windows)
+-    #if !os(WASI)
++    #if !(os(WASI) || os(Emscripten))
+     /// Protocol family not supported.
+     public static var EPFNOSUPPORT: POSIXErrorCode {
+         return .EPFNOSUPPORT
+@@ -386,7 +388,7 @@ extension POSIXError {
+         return .ENOTCONN
+     }
+ 
+-    #if !os(WASI)
++    #if !(os(WASI) || os(Emscripten))
+     /// Can't send after socket shutdown.
+     public static var ESHUTDOWN: POSIXErrorCode {
+         return .ESHUTDOWN
+@@ -420,7 +422,7 @@ extension POSIXError {
+     }
+ 
+     #if !os(Windows)
+-    #if !os(WASI)
++    #if !(os(WASI) || os(Emscripten))
+     /// Host is down.
+     public static var EHOSTDOWN: POSIXErrorCode {
+         return .EHOSTDOWN
+@@ -448,7 +450,7 @@ extension POSIXError {
+     #endif
+     
+     #if !os(Windows)
+-    #if !os(WASI)
++    #if !(os(WASI) || os(Emscripten))
+     /// Too many users.
+     public static var EUSERS: POSIXErrorCode {
+         return .EUSERS
+@@ -469,7 +471,7 @@ extension POSIXError {
+         return .ESTALE
+     }
+ 
+-    #if !os(WASI)
++    #if !(os(WASI) || os(Emscripten))
+     /// Too many levels of remote in path.
+     public static var EREMOTE: POSIXErrorCode {
+         return .EREMOTE
+@@ -623,7 +625,7 @@ extension POSIXError {
+         return .EMULTIHOP
+     }
+ 
+-    #if !os(WASI) && !os(FreeBSD)
++    #if !(os(WASI) || os(Emscripten)) && !os(FreeBSD)
+     /// No message available on STREAM.
+     public static var ENODATA: POSIXErrorCode {
+         return .ENODATA
+@@ -635,7 +637,7 @@ extension POSIXError {
+         return .ENOLINK
+     }
+ 
+-    #if !os(WASI) && !os(FreeBSD)
++    #if !(os(WASI) || os(Emscripten)) && !os(FreeBSD)
+     /// No STREAM resources.
+     public static var ENOSR: POSIXErrorCode {
+         return .ENOSR
+@@ -653,7 +655,7 @@ extension POSIXError {
+         return .EPROTO
+     }
+ 
+-    #if !os(OpenBSD) && !os(WASI) && !os(FreeBSD)
++    #if !os(OpenBSD) && !(os(WASI) || os(Emscripten)) && !os(FreeBSD)
+     /// STREAM ioctl timeout.
+     public static var ETIME: POSIXErrorCode {
+         return .ETIME
+diff --git a/Sources/FoundationEssentials/FileManager/FileManager+Basics.swift b/Sources/FoundationEssentials/FileManager/FileManager+Basics.swift
+index 3144764..e70d836 100644
+--- a/Sources/FoundationEssentials/FileManager/FileManager+Basics.swift
++++ b/Sources/FoundationEssentials/FileManager/FileManager+Basics.swift
+@@ -16,6 +16,8 @@ import Darwin
+ @preconcurrency import Android
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif os(Windows)
+diff --git a/Sources/FoundationEssentials/FileManager/FileManager+Directories.swift b/Sources/FoundationEssentials/FileManager/FileManager+Directories.swift
+index e1db5a9..37ffcdf 100644
+--- a/Sources/FoundationEssentials/FileManager/FileManager+Directories.swift
++++ b/Sources/FoundationEssentials/FileManager/FileManager+Directories.swift
+@@ -23,6 +23,8 @@ import Darwin
+ import unistd
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif os(Windows)
+@@ -205,7 +207,7 @@ extension _FileManagerImpl {
+             }
+         }
+         return results
+-#elseif os(WASI) || os(OpenBSD)
++#elseif os(WASI) || os(Emscripten) || os(OpenBSD)
+         // wasi-libc does not support FTS for now
+         throw CocoaError.errorWithFilePath(.featureUnsupported, path)
+ #else
+diff --git a/Sources/FoundationEssentials/FileManager/FileManager+Files.swift b/Sources/FoundationEssentials/FileManager/FileManager+Files.swift
+index b2666cc..f95e26f 100644
+--- a/Sources/FoundationEssentials/FileManager/FileManager+Files.swift
++++ b/Sources/FoundationEssentials/FileManager/FileManager+Files.swift
+@@ -23,13 +23,16 @@ import posix_filesystem
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
+ internal import _FoundationCShims
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
++internal import _FoundationCShims
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ internal import _FoundationCShims
+ #elseif os(Windows)
+ import CRT
+ import WinSDK
+-#elseif os(WASI)
++#elseif (os(WASI) || os(Emscripten))
+ internal import _FoundationCShims
+ @preconcurrency import WASILibc
+ #endif
+@@ -176,7 +179,7 @@ extension stat {
+             .ownerAccountID : _writeFileAttributePrimitive(st_uid, as: UInt.self),
+             .groupOwnerAccountID : _writeFileAttributePrimitive(st_gid, as: UInt.self)
+         ]
+-        #if !os(WASI)
++        #if !(os(WASI) || os(Emscripten))
+         if let userName = Platform.name(forUID: st_uid) {
+             result[.ownerAccountName] = userName
+         }
+@@ -260,7 +263,7 @@ extension _FileManagerImpl {
+             }
+             attr?[.protectionKey] = nil
+         }
+-        #elseif os(WASI)
++        #elseif (os(WASI) || os(Emscripten))
+         // `.atomic` is unavailable on WASI
+         let opts: Data.WritingOptions = []
+         #else
+@@ -462,7 +465,7 @@ extension _FileManagerImpl {
+             parent = fileManager.currentDirectoryPath
+         }
+ 
+-#if os(Windows) || os(WASI)
++#if os(Windows) || (os(WASI) || os(Emscripten))
+         return fileManager.isWritableFile(atPath: parent) && fileManager.isWritableFile(atPath: path)
+ #else
+         guard fileManager.isWritableFile(atPath: parent),
+@@ -485,7 +488,7 @@ extension _FileManagerImpl {
+ #endif
+     }
+ 
+-#if !os(Windows) && !os(WASI) && !os(OpenBSD)
++#if !os(Windows) && !(os(WASI) || os(Emscripten)) && !os(OpenBSD)
+     private func _extendedAttribute(_ key: UnsafePointer<CChar>, at path: UnsafePointer<CChar>, followSymlinks: Bool) throws -> Data? {
+         #if canImport(Darwin)
+         var size = getxattr(path, key, nil, 0, 0, followSymlinks ? 0 : XATTR_NOFOLLOW)
+@@ -647,7 +650,7 @@ extension _FileManagerImpl {
+             
+             var attributes = statAtPath.fileAttributes
+             try? Self._catInfo(for: URL(filePath: path, directoryHint: .isDirectory), statInfo: statAtPath, into: &attributes)
+-            #if !os(WASI) && !os(OpenBSD)
++            #if !(os(WASI) || os(Emscripten)) && !os(OpenBSD)
+             if let extendedAttrs = try? _extendedAttributes(at: fsRep, followSymlinks: false) {
+                 attributes[._extendedAttributes] = extendedAttrs
+             }
+@@ -713,7 +716,7 @@ extension _FileManagerImpl {
+                 ]
+             }
+         }
+-#elseif os(WASI)
++#elseif (os(WASI) || os(Emscripten))
+         // WASI does not support file system attributes
+         return [:]
+ #else
+@@ -913,7 +916,7 @@ extension _FileManagerImpl {
+             // Like the immutable flag, if write permissions are being set, do it first. If they are being unset, do it last.
+             var setMode: (() throws -> Void)?
+             if let mode {
+-                #if os(WASI)
++                #if (os(WASI) || os(Emscripten))
+                 // WASI does not have the concept of permissions
+                 throw CocoaError.errorWithFilePath(.featureUnsupported, path)
+                 #else
+@@ -936,7 +939,7 @@ extension _FileManagerImpl {
+             let groupID = _readFileAttributePrimitive(attributes[.groupOwnerAccountID], as: UInt.self)
+             
+             if user != nil || userID != nil || group != nil || groupID != nil {
+-                #if os(WASI)
++                #if (os(WASI) || os(Emscripten))
+                 // WASI does not have the concept of users or groups
+                 throw CocoaError.errorWithFilePath(.featureUnsupported, path)
+                 #else
+@@ -953,7 +956,7 @@ extension _FileManagerImpl {
+             try Self._setCatInfoAttributes(attributes, path: path)
+             
+             if let extendedAttrs = attributes[.init("NSFileExtendedAttributes")] as? [String : Data] {
+-                #if os(WASI) || os(OpenBSD)
++                #if (os(WASI) || os(Emscripten)) || os(OpenBSD)
+                 // WASI does not support extended attributes
+                 throw CocoaError.errorWithFilePath(.featureUnsupported, path)
+                 #elseif canImport(Android)
+diff --git a/Sources/FoundationEssentials/FileManager/FileManager+SymbolicLinks.swift b/Sources/FoundationEssentials/FileManager/FileManager+SymbolicLinks.swift
+index 5e3b643..015806c 100644
+--- a/Sources/FoundationEssentials/FileManager/FileManager+SymbolicLinks.swift
++++ b/Sources/FoundationEssentials/FileManager/FileManager+SymbolicLinks.swift
+@@ -17,6 +17,8 @@ import Darwin
+ import unistd
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif os(Windows)
+diff --git a/Sources/FoundationEssentials/FileManager/FileManager+Utilities.swift b/Sources/FoundationEssentials/FileManager/FileManager+Utilities.swift
+index d882a67..e688ade 100644
+--- a/Sources/FoundationEssentials/FileManager/FileManager+Utilities.swift
++++ b/Sources/FoundationEssentials/FileManager/FileManager+Utilities.swift
+@@ -28,6 +28,9 @@ import Darwin
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
+ internal import _FoundationCShims
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
++internal import _FoundationCShims
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ internal import _FoundationCShims
+@@ -178,7 +181,7 @@ extension _FileManagerImpl {
+         #endif
+     }
+ 
+-#if !os(Windows) && !os(WASI) && !os(OpenBSD)
++#if !os(Windows) && !(os(WASI) || os(Emscripten)) && !os(OpenBSD)
+     static func _setAttribute(_ key: UnsafePointer<CChar>, value: Data, at path: UnsafePointer<CChar>, followSymLinks: Bool) throws {
+         try value.withUnsafeBytes { buffer in
+             #if canImport(Darwin)
+diff --git a/Sources/FoundationEssentials/FileManager/FileOperations+Enumeration.swift b/Sources/FoundationEssentials/FileManager/FileOperations+Enumeration.swift
+index 1d497f8..214caa0 100644
+--- a/Sources/FoundationEssentials/FileManager/FileOperations+Enumeration.swift
++++ b/Sources/FoundationEssentials/FileManager/FileOperations+Enumeration.swift
+@@ -120,6 +120,8 @@ import posix_filesystem.dirent
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
+ internal import _FoundationCShims
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif os(WASI)
+@@ -130,7 +132,7 @@ internal import _FoundationCShims
+ // MARK: Directory Iteration
+ 
+ // No FTS support in wasi-libc for now (https://github.com/WebAssembly/wasi-libc/issues/520)
+-#if !os(WASI)
++#if !(os(WASI) || os(Emscripten))
+ 
+ struct _FTSSequence: Sequence {
+     enum Element {
+@@ -328,12 +330,12 @@ extension Sequence<_FTSSequence.Element> {
+     }
+ }
+ 
+-#endif // !os(WASI)
++#endif // !(os(WASI) || os(Emscripten))
+ 
+ struct _POSIXDirectoryContentsSequence: Sequence {
+     #if canImport(Darwin)
+     typealias DirectoryEntryPtr = UnsafeMutablePointer<DIR>
+-    #elseif canImport(Android) || canImport(Glibc) || canImport(Musl) || os(WASI)
++    #elseif canImport(Android) || canImport(Glibc) || canImport(Musl) || canImport(EmscriptenLibc) || (os(WASI) || os(Emscripten))
+     typealias DirectoryEntryPtr = OpaquePointer
+     #endif
+     
+diff --git a/Sources/FoundationEssentials/FileManager/FileOperations.swift b/Sources/FoundationEssentials/FileManager/FileOperations.swift
+index 1c28880..af16606 100644
+--- a/Sources/FoundationEssentials/FileManager/FileOperations.swift
++++ b/Sources/FoundationEssentials/FileManager/FileOperations.swift
+@@ -16,6 +16,8 @@ import Darwin
+ @preconcurrency import Android
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif os(Windows)
+@@ -533,7 +535,7 @@ enum _FileOperations {
+             throw CocoaError.removeFileError(errno, resolve(path: pathStr))
+         }
+ 
+-        #if os(WASI)
++        #if (os(WASI) || os(Emscripten))
+ 
+         // wasi-libc does not support FTS, so we don't support removing non-empty directories on WASI for now.
+         throw CocoaError.errorWithFilePath(.featureUnsupported, pathStr)
+@@ -894,7 +896,7 @@ enum _FileOperations {
+         }
+         defer { close(dstfd) }
+ 
+-        #if !os(WASI) // WASI doesn't have fchmod for now
++        #if !(os(WASI) || os(Emscripten)) // WASI doesn't have fchmod for now
+         // Set the file permissions using fchmod() instead of when open()ing to avoid umask() issues
+         let permissions = mode_t(fileInfo.st_mode) & ~S_IFMT
+         guard fchmod(dstfd, permissions) == 0 else {
+@@ -921,7 +923,7 @@ enum _FileOperations {
+         }
+         var current: off_t = 0
+         
+-        #if os(WASI) || os(OpenBSD)
++        #if (os(WASI) || os(Emscripten)) || os(OpenBSD)
+         // WASI doesn't have sendfile, so we need to do it in user space with read/write
+         try withUnsafeTemporaryAllocation(of: UInt8.self, capacity: chunkSize) { buffer in
+             while current < total {
+@@ -958,7 +960,7 @@ enum _FileOperations {
+     
+     #if !canImport(Darwin)
+     private static func _copyDirectoryMetadata(srcFD: CInt, srcPath: @autoclosure () -> String, dstFD: CInt, dstPath: @autoclosure () -> String, delegate: some LinkOrCopyDelegate) throws {
+-        #if !os(WASI) && !os(Android) && !os(OpenBSD)
++        #if !(os(WASI) || os(Emscripten)) && !os(Android) && !os(OpenBSD)
+         // Copy extended attributes
+         #if os(FreeBSD)
+         // FreeBSD uses the `extattr_*` calls for setting extended attributes. Unlike like, the namespace for the extattrs are not determined by prefix of the attribute
+@@ -1031,7 +1033,7 @@ enum _FileOperations {
+         #endif
+         var statInfo = stat()
+         if fstat(srcFD, &statInfo) == 0 {
+-            #if !os(WASI) // WASI doesn't have fchown for now
++            #if !(os(WASI) || os(Emscripten)) // WASI doesn't have fchown for now
+             // Copy owner/group
+             if fchown(dstFD, statInfo.st_uid, statInfo.st_gid) != 0 {
+                 try delegate.throwIfNecessary(errno, srcPath(), dstPath())
+@@ -1049,7 +1051,7 @@ enum _FileOperations {
+                 }
+             }
+             
+-            #if !os(WASI) // WASI doesn't have fchmod for now
++            #if !(os(WASI) || os(Emscripten)) // WASI doesn't have fchmod for now
+             // Copy permissions
+             if fchmod(dstFD, mode_t(statInfo.st_mode)) != 0 {
+                 try delegate.throwIfNecessary(errno, srcPath(), dstPath())
+@@ -1091,7 +1093,7 @@ enum _FileOperations {
+         #endif
+     }
+ 
+-    #if os(WASI)
++    #if (os(WASI) || os(Emscripten))
+     private static func _linkOrCopyFile(_ srcPtr: UnsafePointer<CChar>, _ dstPtr: UnsafePointer<CChar>, with fileManager: FileManager, delegate: some LinkOrCopyDelegate) throws {
+         let src = String(cString: srcPtr)
+         let dst = String(cString: dstPtr)
+diff --git a/Sources/FoundationEssentials/Formatting/BinaryInteger+NumericStringRepresentation.swift b/Sources/FoundationEssentials/Formatting/BinaryInteger+NumericStringRepresentation.swift
+index aa03a8c..01659d4 100644
+--- a/Sources/FoundationEssentials/Formatting/BinaryInteger+NumericStringRepresentation.swift
++++ b/Sources/FoundationEssentials/Formatting/BinaryInteger+NumericStringRepresentation.swift
+@@ -16,6 +16,8 @@ import Darwin
+ @preconcurrency import Bionic
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif os(Windows)
+diff --git a/Sources/FoundationEssentials/LockedState.swift b/Sources/FoundationEssentials/LockedState.swift
+index 2316fb9..f78aaf9 100644
+--- a/Sources/FoundationEssentials/LockedState.swift
++++ b/Sources/FoundationEssentials/LockedState.swift
+@@ -19,6 +19,8 @@ internal import C.os.lock
+ @preconcurrency import Bionic
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif canImport(WinSDK)
+@@ -33,7 +35,7 @@ package struct LockedState<State> {
+         typealias Primitive = os_unfair_lock
+ #elseif os(FreeBSD) || os(OpenBSD)
+         typealias Primitive = pthread_mutex_t?
+-#elseif canImport(Bionic) || canImport(Glibc) || canImport(Musl)
++#elseif canImport(Bionic) || canImport(Glibc) || canImport(Musl) || canImport(EmscriptenLibc)
+         typealias Primitive = pthread_mutex_t
+ #elseif canImport(WinSDK)
+         typealias Primitive = SRWLOCK
+@@ -48,7 +50,7 @@ package struct LockedState<State> {
+         fileprivate static func initialize(_ platformLock: PlatformLock) {
+ #if canImport(os)
+             platformLock.initialize(to: os_unfair_lock())
+-#elseif canImport(Bionic) || canImport(Glibc) || canImport(Musl)
++#elseif canImport(Bionic) || canImport(Glibc) || canImport(Musl) || canImport(EmscriptenLibc)
+             pthread_mutex_init(platformLock, nil)
+ #elseif canImport(WinSDK)
+             InitializeSRWLock(platformLock)
+@@ -60,7 +62,7 @@ package struct LockedState<State> {
+         }
+ 
+         fileprivate static func deinitialize(_ platformLock: PlatformLock) {
+-#if canImport(Bionic) || canImport(Glibc) || canImport(Musl)
++#if canImport(Bionic) || canImport(Glibc) || canImport(Musl) || canImport(EmscriptenLibc)
+             pthread_mutex_destroy(platformLock)
+ #endif
+             platformLock.deinitialize(count: 1)
+@@ -69,7 +71,7 @@ package struct LockedState<State> {
+         static fileprivate func lock(_ platformLock: PlatformLock) {
+ #if canImport(os)
+             os_unfair_lock_lock(platformLock)
+-#elseif canImport(Bionic) || canImport(Glibc) || canImport(Musl)
++#elseif canImport(Bionic) || canImport(Glibc) || canImport(Musl) || canImport(EmscriptenLibc)
+             pthread_mutex_lock(platformLock)
+ #elseif canImport(WinSDK)
+             AcquireSRWLockExclusive(platformLock)
+@@ -83,7 +85,7 @@ package struct LockedState<State> {
+         static fileprivate func unlock(_ platformLock: PlatformLock) {
+ #if canImport(os)
+             os_unfair_lock_unlock(platformLock)
+-#elseif canImport(Bionic) || canImport(Glibc) || canImport(Musl)
++#elseif canImport(Bionic) || canImport(Glibc) || canImport(Musl) || canImport(EmscriptenLibc)
+             pthread_mutex_unlock(platformLock)
+ #elseif canImport(WinSDK)
+             ReleaseSRWLockExclusive(platformLock)
+diff --git a/Sources/FoundationEssentials/Platform.swift b/Sources/FoundationEssentials/Platform.swift
+index 7e9800a..93e842f 100644
+--- a/Sources/FoundationEssentials/Platform.swift
++++ b/Sources/FoundationEssentials/Platform.swift
+@@ -10,6 +10,9 @@
+ //===----------------------------------------------------------------------===//
+ 
+ internal import _FoundationCShims
++#if os(Emscripten)
++@preconcurrency import EmscriptenLibc
++#endif
+ 
+ #if canImport(Darwin)
+ import Darwin
+@@ -25,7 +28,7 @@ fileprivate let _pageSize: Int = {
+     GetSystemInfo(&sysInfo)
+     return Int(sysInfo.dwPageSize)
+ }()
+-#elseif os(WASI)
++#elseif (os(WASI) || os(Emscripten))
+ // WebAssembly defines a fixed page size
+ fileprivate let _pageSize: Int = 65_536
+ #elseif canImport(Android)
+@@ -34,6 +37,9 @@ fileprivate let _pageSize: Int = Int(getpagesize())
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
+ fileprivate let _pageSize: Int = Int(getpagesize())
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
++fileprivate let _pageSize: Int = Int(getpagesize())
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ fileprivate let _pageSize: Int = Int(getpagesize())
+@@ -113,7 +119,7 @@ private let _cachedUGIDs: (uid_t, gid_t) = {
+ }()
+ #endif
+ 
+-#if !os(Windows) && !os(WASI)
++#if !os(Windows) && !(os(WASI) || os(Emscripten))
+ extension Platform {
+     private static var ROOT_USER: UInt32 { 0 }
+     static func getUGIDs(allowEffectiveRootUID: Bool = true) -> (uid: UInt32, gid: UInt32) {
+@@ -258,7 +264,7 @@ extension Platform {
+         // FIXME: bionic implements this as `return 0;` and does not expose the
+         // function via headers. We should be able to shim this and use the call
+         // if it is available.
+-#if !canImport(Android) && !os(WASI)
++#if !canImport(Android) && !(os(WASI) || os(Emscripten))
+         guard issetugid() == 0 else { return nil }
+ #endif
+         if let value = getenv(name) {
+@@ -306,7 +312,7 @@ extension Platform {
+           }
+           return String(decodingCString: $0.baseAddress!, as: UTF16.self)
+         }
+-#elseif os(WASI) // WASI does not have uname
++#elseif (os(WASI) || os(Emscripten)) // WASI does not have uname
+         return "localhost"
+ #else
+         return withUnsafeTemporaryAllocation(of: CChar.self, capacity: Platform.MAX_HOSTNAME_LENGTH + 1) {
+diff --git a/Sources/FoundationEssentials/ProcessInfo/ProcessInfo.swift b/Sources/FoundationEssentials/ProcessInfo/ProcessInfo.swift
+index acb9440..a5b4fae 100644
+--- a/Sources/FoundationEssentials/ProcessInfo/ProcessInfo.swift
++++ b/Sources/FoundationEssentials/ProcessInfo/ProcessInfo.swift
+@@ -19,11 +19,13 @@ import Darwin
+ import unistd
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif os(Windows)
+ import WinSDK
+-#elseif os(WASI)
++#elseif os(WASI) || os(Emscripten)
+ @preconcurrency import WASILibc
+ #endif
+ 
+@@ -188,7 +190,7 @@ final class _ProcessInfo: Sendable {
+             return username
+         }
+         return ""
+-#elseif os(WASI)
++#elseif os(WASI) || os(Emscripten)
+         // WASI does not have user concept
+         return ""
+ #elseif os(Windows)
+@@ -222,7 +224,7 @@ final class _ProcessInfo: Sendable {
+             return fullName
+         }
+         return ""
+-#elseif os(WASI)
++#elseif os(WASI) || os(Emscripten)
+         return ""
+ #elseif os(Windows)
+         var ulLength: ULONG = 0
+@@ -357,7 +359,7 @@ extension _ProcessInfo {
+         return "Cygwin"
+ #elseif os(Haiku)
+         return "Haiku"
+-#elseif os(WASI)
++#elseif os(WASI) || os(Emscripten)
+         return "WASI"
+ #else
+         // On other systems at least return something.
+diff --git a/Sources/FoundationEssentials/PropertyList/OpenStepPlist.swift b/Sources/FoundationEssentials/PropertyList/OpenStepPlist.swift
+index 3a40bfe..c1cded5 100644
+--- a/Sources/FoundationEssentials/PropertyList/OpenStepPlist.swift
++++ b/Sources/FoundationEssentials/PropertyList/OpenStepPlist.swift
+@@ -16,6 +16,8 @@ import Darwin
+ @preconcurrency import Bionic
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif os(WASI)
+diff --git a/Sources/FoundationEssentials/String/String+IO.swift b/Sources/FoundationEssentials/String/String+IO.swift
+index 640efe4..aca085e 100644
+--- a/Sources/FoundationEssentials/String/String+IO.swift
++++ b/Sources/FoundationEssentials/String/String+IO.swift
+@@ -449,7 +449,7 @@ extension StringProtocol {
+             attributes = [:]
+         }
+ 
+-#if os(WASI)
++#if (os(WASI) || os(Emscripten))
+         guard !useAuxiliaryFile else { throw CocoaError(.featureUnsupported) }
+         let options : Data.WritingOptions = []
+ #else
+@@ -472,7 +472,7 @@ extension StringProtocol {
+             attributes = [:]
+         }
+ 
+-#if os(WASI)
++#if (os(WASI) || os(Emscripten))
+         guard !useAuxiliaryFile else { throw CocoaError(.featureUnsupported) }
+         let options : Data.WritingOptions = []
+ #else
+diff --git a/Sources/FoundationEssentials/String/String+Path.swift b/Sources/FoundationEssentials/String/String+Path.swift
+index bc149ba..b8dded7 100644
+--- a/Sources/FoundationEssentials/String/String+Path.swift
++++ b/Sources/FoundationEssentials/String/String+Path.swift
+@@ -16,6 +16,8 @@ internal import os
+ @preconcurrency import Android
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif os(Windows)
+@@ -480,7 +482,7 @@ extension String {
+             return envVar.standardizingPath
+         }
+         
+-        #if !os(WASI) // WASI does not have user concept
++        #if !(os(WASI) || os(Emscripten)) // WASI does not have user concept
+         // Next, attempt to find the home directory via getpwuid
+         // We use the real UID instead of the EUID here when the EUID is the root user (i.e. a process has called seteuid(0))
+         // In this instance, we historically do this to ensure a stable home directory location for processes that call seteuid(0)
+@@ -549,7 +551,7 @@ extension String {
+         if let envVar = Platform.getEnvSecure("CFFIXED_USER_HOME") {
+             return envVar.standardizingPath
+         }
+-        #if !os(WASI) // WASI does not have user concept
++        #if !(os(WASI) || os(Emscripten)) // WASI does not have user concept
+         // Next, attempt to find the home directory via getpwnam
+         return Platform.homeDirectory(forUserName: user)?.standardizingPath
+         #else
+@@ -592,7 +594,7 @@ extension String {
+         }
+         #endif // canImport(Darwin)
+ 
+-        #if !os(WASI)
++        #if !(os(WASI) || os(Emscripten))
+         if let envValue = Platform.getEnvSecure("TMPDIR") {
+             return normalizedPath(with: envValue)
+         }
+diff --git a/Sources/FoundationEssentials/TimeZone/TimeZone.swift b/Sources/FoundationEssentials/TimeZone/TimeZone.swift
+index c28f7ab..8e64bd4 100644
+--- a/Sources/FoundationEssentials/TimeZone/TimeZone.swift
++++ b/Sources/FoundationEssentials/TimeZone/TimeZone.swift
+@@ -394,7 +394,7 @@ extension TimeZone {
+ 
+ extension TimeZone {
+     internal static func dataFromTZFile(_ name: String) -> Data {
+-#if NO_TZFILE || os(Windows) || os(WASI)
++#if NO_TZFILE || os(Windows) || (os(WASI) || os(Emscripten))
+         return Data()
+ #else
+         let path = TZDIR + "/" + name
+diff --git a/Sources/FoundationEssentials/TimeZone/TimeZone_Cache.swift b/Sources/FoundationEssentials/TimeZone/TimeZone_Cache.swift
+index 1bb3334..756d6d4 100644
+--- a/Sources/FoundationEssentials/TimeZone/TimeZone_Cache.swift
++++ b/Sources/FoundationEssentials/TimeZone/TimeZone_Cache.swift
+@@ -16,6 +16,8 @@ import Darwin
+ import unistd
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif canImport(ucrt)
+diff --git a/Sources/FoundationEssentials/URL/URL_Swift.swift b/Sources/FoundationEssentials/URL/URL_Swift.swift
+index 7da7365..b05a913 100644
+--- a/Sources/FoundationEssentials/URL/URL_Swift.swift
++++ b/Sources/FoundationEssentials/URL/URL_Swift.swift
+@@ -16,6 +16,8 @@ import Darwin
+ @preconcurrency import Android
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif os(Windows)
+diff --git a/Sources/FoundationEssentials/_ThreadLocal.swift b/Sources/FoundationEssentials/_ThreadLocal.swift
+index c5110a4..6cf9d44 100644
+--- a/Sources/FoundationEssentials/_ThreadLocal.swift
++++ b/Sources/FoundationEssentials/_ThreadLocal.swift
+@@ -15,6 +15,8 @@ import Darwin
+ @preconcurrency import Bionic
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif canImport(WinSDK)
+@@ -26,7 +28,7 @@ internal import threads
+ #endif
+ 
+ struct _ThreadLocal {
+-#if canImport(Darwin) || canImport(Bionic) || canImport(Glibc) || canImport(Musl)
++#if canImport(Darwin) || canImport(Bionic) || canImport(Glibc) || canImport(Musl) || canImport(EmscriptenLibc)
+     fileprivate typealias PlatformKey = pthread_key_t
+ #elseif USE_TSS
+     fileprivate typealias PlatformKey = tss_t
+@@ -40,7 +42,7 @@ struct _ThreadLocal {
+         fileprivate let key: PlatformKey
+         
+         init() {
+-#if canImport(Darwin) || canImport(Bionic) || canImport(Glibc) || canImport(Musl)
++#if canImport(Darwin) || canImport(Bionic) || canImport(Glibc) || canImport(Musl) || canImport(EmscriptenLibc)
+             var key = PlatformKey()
+             pthread_key_create(&key, nil)
+             self.key = key
+@@ -58,7 +60,7 @@ struct _ThreadLocal {
+     
+     private static subscript(_ key: PlatformKey) -> UnsafeMutableRawPointer? {
+         get {
+-#if canImport(Darwin) || canImport(Bionic) || canImport(Glibc) || canImport(Musl)
++#if canImport(Darwin) || canImport(Bionic) || canImport(Glibc) || canImport(Musl) || canImport(EmscriptenLibc)
+             pthread_getspecific(key)
+ #elseif USE_TSS
+             tss_get(key)
+@@ -70,7 +72,7 @@ struct _ThreadLocal {
+         }
+         
+         set {
+-#if canImport(Darwin) || canImport(Bionic) || canImport(Glibc) || canImport(Musl)
++#if canImport(Darwin) || canImport(Bionic) || canImport(Glibc) || canImport(Musl) || canImport(EmscriptenLibc)
+             pthread_setspecific(key, newValue)
+ #elseif USE_TSS
+             tss_set(key, newValue)
+diff --git a/Sources/FoundationInternationalization/Calendar/Calendar_ICU.swift b/Sources/FoundationInternationalization/Calendar/Calendar_ICU.swift
+index 2b68c40..97e9360 100644
+--- a/Sources/FoundationInternationalization/Calendar/Calendar_ICU.swift
++++ b/Sources/FoundationInternationalization/Calendar/Calendar_ICU.swift
+@@ -18,6 +18,8 @@ import FoundationEssentials
+ @preconcurrency import Android
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif canImport(CRT)
+diff --git a/Sources/FoundationInternationalization/Date+ICU.swift b/Sources/FoundationInternationalization/Date+ICU.swift
+index 3bacc32..81d47bf 100644
+--- a/Sources/FoundationInternationalization/Date+ICU.swift
++++ b/Sources/FoundationInternationalization/Date+ICU.swift
+@@ -19,6 +19,8 @@ internal import _FoundationICU
+ @preconcurrency import Bionic
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif canImport(Darwin)
+diff --git a/Sources/FoundationInternationalization/Formatting/Date/ICUDateFormatter.swift b/Sources/FoundationInternationalization/Formatting/Date/ICUDateFormatter.swift
+index 2e02a20..1d1854c 100644
+--- a/Sources/FoundationInternationalization/Formatting/Date/ICUDateFormatter.swift
++++ b/Sources/FoundationInternationalization/Formatting/Date/ICUDateFormatter.swift
+@@ -22,6 +22,8 @@ import Darwin
+ @preconcurrency import Bionic
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #endif
+diff --git a/Sources/FoundationInternationalization/Formatting/Duration+Formatting.swift b/Sources/FoundationInternationalization/Formatting/Duration+Formatting.swift
+index cf2ad5b..16eff3a 100644
+--- a/Sources/FoundationInternationalization/Formatting/Duration+Formatting.swift
++++ b/Sources/FoundationInternationalization/Formatting/Duration+Formatting.swift
+@@ -20,6 +20,8 @@ import Darwin
+ @preconcurrency import Bionic
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
++#elseif canImport(EmscriptenLibc)
++@preconcurrency import EmscriptenLibc
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ #elseif os(Windows)

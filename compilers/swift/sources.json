@@ -1,0 +1,42 @@
+{
+  "swift": {
+    "revision": "6b8daddf6f30bb1bbdcaaede7f673e76eb155278",
+    "url": "https://github.com/swiftlang/swift.git"
+  },
+  "llvm": {
+    "revision": "ab70a4c40271da180ff2fcf2d92cd24bee8a2cb3",
+    "url": "https://github.com/swiftlang/llvm-project.git"
+  },
+  "cmark": {
+    "revision": "0c8947bbd58c491c54aae114aca40621cddc8357",
+    "url": "https://github.com/swiftlang/swift-cmark.git"
+  },
+  "stringProcessing": {
+    "revision": "a6ac4f725d0a28e8fa01ed2a2f23b97add65b776",
+    "url": "https://github.com/swiftlang/swift-experimental-string-processing.git"
+  },
+  "emscripten": {
+    "version": "6.0.8",
+    "channel": "emscripten-forge-6x"
+  },
+  "foundation": {
+    "url": "https://github.com/swiftlang/swift-foundation.git",
+    "revision": "a1c611f6ecc0164b5a489f23013e5c637e9e5cd1"
+  },
+  "corelibsFoundation": {
+    "url": "https://github.com/swiftlang/swift-corelibs-foundation.git",
+    "revision": "edfa17dd3623877a38967ae3edd356942fe4f655"
+  },
+  "foundationICU": {
+    "url": "https://github.com/swiftlang/swift-foundation-icu.git",
+    "revision": "af704420e3feb4c36664ddcfbce6ae142ab84aff"
+  },
+  "collections": {
+    "url": "https://github.com/apple/swift-collections.git",
+    "revision": "c11818f3cae0780656baa430b49e7f163f08dffd"
+  },
+  "libxml2": {
+    "url": "https://gitlab.gnome.org/GNOME/libxml2.git",
+    "revision": "2b998a4ffbdfea04fc6a620721abc690a15743af"
+  }
+}

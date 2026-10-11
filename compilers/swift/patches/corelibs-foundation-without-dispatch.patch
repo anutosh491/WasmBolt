@@ -1,0 +1,56 @@
+diff --git a/Sources/CoreFoundation/CFRunLoop.c b/Sources/CoreFoundation/CFRunLoop.c
+index 3a6a0aaa..4d787b7d 100644
+--- a/Sources/CoreFoundation/CFRunLoop.c
++++ b/Sources/CoreFoundation/CFRunLoop.c
+@@ -9,6 +9,10 @@
+ */
+ 
+ #include "CFBase.h"
++#include "CFInternal.h"
++
++CONST_STRING_DECL(kCFRunLoopDefaultMode, "kCFRunLoopDefaultMode")
++CONST_STRING_DECL(kCFRunLoopCommonModes, "kCFRunLoopCommonModes")
+ 
+ #if __HAS_DISPATCH__
+ 
+@@ -17,7 +21,6 @@
+ #include "CFBag.h"
+ #include "CFNumber.h"
+ #include "CFPreferences.h"
+-#include "CFInternal.h"
+ #include "CFPriv.h"
+ #include "CFRuntime_Internal.h"
+ #include "CFMachPort_Internal.h"
+@@ -1448,8 +1451,6 @@ CF_INLINE void __CFRunLoopTimerUnlock(CFRunLoopTimerRef rlt) {
+ 
+ /* CFRunLoop */
+ 
+-CONST_STRING_DECL(kCFRunLoopDefaultMode, "kCFRunLoopDefaultMode")
+-CONST_STRING_DECL(kCFRunLoopCommonModes, "kCFRunLoopCommonModes")
+ 
+ // call with rl and rlm locked
+ static CFRunLoopSourceRef __CFRunLoopModeFindSourceForMachPort(CFRunLoopRef rl, CFRunLoopModeRef rlm, __CFPort port) {	/* DOES CALLOUT */
+diff --git a/Sources/Foundation/Timer.swift b/Sources/Foundation/Timer.swift
+index 0d574255..a128e03c 100644
+--- a/Sources/Foundation/Timer.swift
++++ b/Sources/Foundation/Timer.swift
+@@ -10,6 +10,13 @@
+ 
+ @_implementationOnly import CoreFoundation
+ 
++#if !canImport(Dispatch)
++open class Timer: NSObject {
++    @available(*, unavailable, message: "Timers require Dispatch")
++    public override init() { super.init() }
++}
++#else
++
+ internal func __NSFireTimer(_ timer: CFRunLoopTimer?, info: UnsafeMutableRawPointer?) -> Void {
+     let t: Timer = NSObject.unretainedReference(info!)
+     t._fire(t)
+@@ -123,3 +130,5 @@ open class Timer : NSObject {
+         return nil
+     }
+ }
++
++#endif // canImport(Dispatch)

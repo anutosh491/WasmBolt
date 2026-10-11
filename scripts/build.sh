@@ -43,6 +43,11 @@ cp language-services/clangd/*.{js,css} "$site_dir/language-services/clangd/"
 cp "${LLVM_WASM_PREFIX}"/bin/clangd.{js,wasm} "$site_dir/language-services/clangd/runtime/"
 cp ui/vendor/coi-serviceworker.js "$site_dir/"
 cp ui/vendor/coi-serviceworker.LICENSE "$site_dir/"
+for directory in compilers/swift; do
+  [[ -d "$directory" ]] || continue
+  mkdir -p "$site_dir/$directory"
+  cp "$directory"/*.js "$site_dir/$directory/"
+done
 cp tutorials.md tutorial_*.md "$site_dir/"
 cp "$build_dir"/Compiler.{js,wasm,data} "$site_dir/runtime/"
 for tool in opt llc llvm-ar llvm-cxxfilt llvm-nm llvm-objcopy llvm-objdump \
