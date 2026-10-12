@@ -3,7 +3,7 @@
 **WasmBolt is a browser-native laboratory for MLIR, C, C++ and LLVM.** It embeds
 Clang's frontend and the WebAssembly LLD linker in an Emscripten runtime, and
 uses published LLVM, MLIR and Graphviz tool modules in Web Workers. The complete
-pipeline runs locally in the browser. Try here : https://anutosh21.github.io/WasmBolt/
+pipeline runs locally in the browser. Try here : [https://anutosh21.github.io/WasmBolt/](https://anutosh21.github.io/WasmBolt2/)
 
 Start with the [tutorials](tutorials.md) for MLIR, WebAssembly, LLVM utilities,
 x86-64 and AArch64.
