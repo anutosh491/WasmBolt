@@ -104,6 +104,10 @@ call line; Step over completes its assignment. The six initial workspace sources
 are editable before the compiler loads; generated `debug.o` and `debug.wasm`
 appear after Start.
 
+The JSON example's headers are installed before compiler readiness, so ordinary
+compilation works before opening the debugger. Executable runtime archives still
+load only when starting a session; existing files are reused.
+
 ## Current repository boundary
 
 Based on the 6-x structure on 2026-10-10. All reproduction files are under

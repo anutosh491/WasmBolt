@@ -145,13 +145,14 @@ export async function installDebugger(host) {
     else if (name === 'output') log((body.output || '').replace(/\n$/, ''));
     else if (name === 'fatal') { state('error', body.message); log(body.message); }
   }
-  async function resources() {
-    installing ||= (async () => {
+  async function resources(headersOnly = false) {
+    const install = async () => {
       const manifest = await fetch(new URL('./guest-files.json', import.meta.url)).then(response => {
         if (!response.ok) throw new Error('Guest SDK is missing; run scripts/70-stage-site.py');
         return response.json();
       });
-      await Promise.all(manifest.map(async ({ path, url }) => {
+      await Promise.all(manifest.filter(({ path }) => !headersOnly || path.startsWith('/include/')).map(async ({ path, url }) => {
+        if (host.FS.analyzePath(path).exists) return;
         let bytes;
         if (path.endsWith('.a')) bytes = await downloadWasm(new URL(url, import.meta.url));
         else {
@@ -162,7 +163,9 @@ export async function installDebugger(host) {
         host.FS.mkdirTree(path.slice(0, path.lastIndexOf('/')));
         host.FS.writeFile(path, new Uint8Array(bytes));
       }));
-    })().catch(error => { installing = null; throw error; });
+    };
+    if (headersOnly) return install();
+    installing ||= install().catch(error => { installing = null; throw error; });
     await installing;
   }
   async function start(restart = false) {
@@ -228,6 +231,7 @@ export async function installDebugger(host) {
     } catch (error) { showError(error); }
     finally { commandBusy = false; update(); }
   };
+  await resources(true);
   host.refresh(); update();
   return {
     update,

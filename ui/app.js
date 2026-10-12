@@ -930,8 +930,6 @@ async function loadCompiler(workspaceReady) {
       elements.target.value = runtimeTriple;
 
     elements.log.textContent = "";
-    setBusy(false);
-    setStatus("Compiler ready");
     installClangd({
       FS: compiler.FS,
       get resourceDir() { return resourceDir; },
@@ -962,6 +960,8 @@ async function loadCompiler(workspaceReady) {
         }
       },
     });
+    setBusy(false);
+    setStatus("Compiler ready");
     elements.target.addEventListener("change", () => debuggerUi.update());
     if ($("#toggle-debugger").getAttribute("aria-expanded") === "true") debuggerUi.preload();
     const autorun = new URLSearchParams(location.search).get("autorun");
