@@ -43,7 +43,7 @@ def add_file(archive, source, name):
 # excludes archive symlinks, so every resource is a regular file here.
 with contextlib.ExitStack() as stack:
     archives = {}
-    names = ['runtime.tar.gz', 'modules.tar.gz']
+    names = ['runtime.tar.gz', 'link-runtime.tar.gz', 'modules.tar.gz']
     if args.foundation_sdk:
         names.append('foundation.tar.gz')
     if host_runtime.is_dir():
@@ -90,15 +90,32 @@ with contextlib.ExitStack() as stack:
                 name = f'swift/{source.relative_to(args.foundation_sdk)}'
                 entries[name] = source
                 foundation_entries.add(name)
+    link_directories = set()
     for name, source in sorted(entries.items()):
-        target = 'foundation.tar.gz' if name in foundation_entries else 'runtime.tar.gz'
+        target = ('foundation.tar.gz' if name in foundation_entries else
+                  'link-runtime.tar.gz' if source.suffix in ['.a', '.o'] else
+                  'runtime.tar.gz')
+        if target == 'link-runtime.tar.gz':
+            directory = str(pathlib.PurePosixPath(name).parent)
+            if directory not in link_directories:
+                entry = tarfile.TarInfo(directory)
+                entry.type = tarfile.DIRTYPE
+                entry.mode = 0o755
+                archives['runtime.tar.gz'].addfile(entry)
+                link_directories.add(directory)
         add_file(archives[target], source, name)
         if source.suffix not in ['.a', '.o']:
             add_file(archives['modules.tar.gz'], source, name)
             if 'repl-modules.tar.gz' in archives:
                 relative = name.removeprefix('swift/lib/swift/')
                 host_source = host_runtime / relative
-                add_file(archives['repl-modules.tar.gz'], host_source if host_source.is_file() else source, name)
+                # REPL installs the cached core SDK first, then only files
+                # absent from that SDK or different for the host runtime.
+                # Keep optional module metadata visible at context creation;
+                # introducing those directories later failed module discovery.
+                repl_source = host_source if host_source.is_file() else source
+                if target == 'foundation.tar.gz' or not filecmp.cmp(repl_source, source, shallow=False):
+                    add_file(archives['repl-modules.tar.gz'], repl_source, name)
     if 'repl-modules.tar.gz' in archives:
         for source in sorted(host_runtime.rglob('*')):
             name = f'swift/lib/swift/{source.relative_to(host_runtime)}'

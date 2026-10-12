@@ -1,45 +1,107 @@
-# Swift demo timings
+# Browser demo timings
 
-Measured **2026-10-11** on an **Apple M5, 16 GiB RAM, macOS 26.5.1**, using
+Measured **2026-10-12** on an **Apple M5, 16 GiB RAM, macOS 26.5.1**, using
 headless Chrome **154.0.8037.98**, without network or CPU throttling.
-[Public demo](https://wasmbolt-swift-demo.pages.dev/?language=swift);
-[measured deployment](https://c276aa77.wasmbolt-swift-demo.pages.dev/?language=swift),
-source `7e83b3f`. Compilation, linking, debugging and execution happen in the
-browser; Cloudflare serves the build files. These observations depend on this
-machine and connection, and are not guaranteed visitor timings or native parity.
+[Swift deployment](https://0be96219.wasmbolt-swift-demo.pages.dev/?language=swift),
+[LLDB deployment](https://7881155d.wasmbolt-lldb-demo.pages.dev/),
+[Clang REPL deployment](https://acc539f1.wasmbolt-lldb-demo.pages.dev/).
+These are observations on this machine and connection, not guaranteed visitor
+latencies or native performance parity. Compilation and execution happen in the browser.
 
-## First use and cached use
+## Swift first visit and cached use
 
-Times below are seconds. Compiler startup and Date rows show median (range)
-across three fresh browser contexts, three cached reloads and nine same-page
-Date repeats. Cold REPL/debugger/CFG ranges cover two contexts; their cached
-reload timings are single observations. A reload keeps downloaded assets but
-creates fresh workers; reopening the REPL means `:quit`, then `swift repl`.
+Times are seconds. Compiler and program rows give median (range) from three
+fresh profiles and three cached reloads; repeated Fibonacci/Date rows cover nine/six
+clicks. CFG, debugger and REPL rows are single observations. Reload retains assets
+but creates new workers and compiler module caches. Reopen means `:quit`, then
+`swift repl` without reloading.
 
-| Operation | First use, including downloads | Same page, subsequent use | After reload, assets cached |
+| Operation | First use | Same page, subsequent use | Cached reload |
 | --- | ---: | ---: | ---: |
-| Open page → compiler ready | 17.7 (17.6–21.9) | Compiler stays loaded | 1.6 (1.3–1.6) |
-| `dates.swift`: Compile & Run, `-O` | 10.7 (10.6–14.3) | 1.2 (1.1–1.5) | 3.7 (3.2–3.9) |
-| Fibonacci CFG → rendered graph, `-O` | 4.2–4.3 | 0.3–0.4 | 0.7 |
-| Open bug panel → LLDB ready | 13.4–14.2 | Debugger stays loaded | 0.5 |
-| `swift repl` → usable prompt | 14.7–25.3 | 2.0–2.3 on reopening | 2.6 |
-| REPL `import Foundation` → prompt | 7.8–11.3 | Not measured separately | 2.2 |
+| Page → editable source and seven workspace files | 0.5–0.8 | Already visible | Not measured separately |
+| Page → compiler ready | 11.2 (10.9–11.4) | Stays loaded | 1.5 (1.4–2.1) |
+| Fibonacci Compile & Run after readiness | 3.7 (3.3–3.8) | 0.5 (0.4–0.7) | 1.6 (1.6–3.6) |
+| Page → first Fibonacci output | 15.1 (14.3–15.3) | — | — |
+| Date Compile & Run after Fibonacci, SDK warming in progress | 8.5 (8.5–8.7) | 1.4 (1.2–1.9) | 4.5 (2.6–4.8) |
+| Fibonacci CFG, including opt/Graphviz loading | 5.2 | 0.3 | 0.6 |
+| Open bug panel → matching Swift LLDB ready | 14.1 | Stays loaded | 0.6 |
+| Start an existing multi-file debug binary → breakpoint | 1.7 | 1.6 on restart | Not measured separately |
+| `swift repl` after exploring compilation/debugging | 12.1 | 1.8 on reopening | 2.8 |
+| REPL `import Foundation` immediately after prompt | 7.6 | Not measured separately | 2.6 |
 
-The first Date row starts **after compiler readiness**. Opening a completely
-fresh page and immediately running Date took approximately **28–36 seconds**
-in total. Cached reloads still initialize runtimes and rebuild compiler module
-caches; cached SDK bytes alone do not give the same speed as a loaded session.
-Network checks confirmed no hashed Foundation payloads were fetched again
-after reload. Small manifest requests still occur.
+The earlier 44 MiB package took **16.1 s (15.6–16.5)** to become compiler-ready
+and **18.2 s (17.1–19.0)** to show its first Fibonacci output in three fresh
+profiles on the same day. The new initial package is **29.8 MiB**: 22.2 MiB
+compiler plus 7.6 MiB headers/modules. Link archives add 7.4 MiB on first linking.
+The native Swift driver's job plan identifies linking actions; AST/SIL/IR/object
+commands need no link archive download. Stronger Brotli compression decodes to
+identical compiler bytes. Repackaging retains all 2,029 original SDK files.
 
-First-use HTTP transfers are approximately **44 MiB** for the compiler/core SDK,
-**22 MiB** for compiler Foundation, **42 MiB** for LLDB, **39 MiB** for the REPL,
-and **18 MiB** for REPL Foundation. CFG adds about **12 MiB** for opt/Graphviz.
-Foundation, debugger, REPL and CFG downloads start only when needed.
+Link inputs warm after essential downloads finish. Other compiler library SDKs
+warm sequentially after the visitor compiles source, unless data saving is enabled.
+REPL binaries/SDKs and LLDB remain on demand. After the REPL prompt appears,
+optional REPL libraries warm separately. Installation remains on demand.
+The generated catalog applies this policy to packaged libraries, not only Foundation.
+
+A separate test opened the REPL immediately after compiler readiness, in two
+fresh profiles. It took **13.3–15.8 s**, **2.2–2.7 s** to reopen, and
+**2.7–3.5 s** after a cached reload. First `1 + 1` took **0.43–0.46 s**.
+An immediate first `import Foundation` took **7.6–9.9 s**, including its
+still-cold optional host library; Date execution then took **0.46–0.87 s**.
+These cold waits remain substantial; this demo does not claim an instant REPL.
+
+The earlier loading policy took **25.3 s** for immediate REPL startup and
+competed with unrelated SDK warming. The REPL now reuses the cached compiler
+headers and downloads a **7.5 MiB host overlay**, rather than a 13.3 MiB full SDK;
+its identical executable compresses to **22.0 MiB**, rather than 25.8 MiB.
+Core plus overlay reproduce every original REPL file byte. Foundation module
+metadata remains present at context creation; only its matching runtime library
+is deferred. Compiler and linker inputs are unchanged by this REPL adjustment.
+Network checks confirm no REPL payload transfer during compiler initialization
+and each requested SDK/binary part transfers once. Before cross-worker download
+coordination, a concurrent import fetched one 17 MiB chunk twice and took 9–12 s.
+
+A separate first-library profile waited **6.4 s** for the complete Foundation SDK,
+then spent **4.4 s** compiling/linking Date, **0.13 s** inspecting the generated
+module and **0.40 s** instantiating/executing it. Background byte warming does
+not precompile a compiler context's imported-module caches. Compiler and REPL
+share downloaded assets, but have separate contexts and target library forms.
+
+## Other demos and tools
+
+Seconds, one fresh profile and cached reload per public deployment. Tool version
+commands check initialization, not general optimization/translation performance.
+opt/Graphviz and mlir-opt load as part of the actual CFG rows; their later version
+commands are already warm.
+
+| Operation | First use | Same page, subsequent use | Cached reload |
+| --- | ---: | ---: | ---: |
+| LLDB C/C++ demo: compiler ready | 10.6 | Stays loaded | 1.0 |
+| Clang REPL demo: compiler ready | 14.5 | Stays loaded | 1.6 |
+| C++ `simple.cpp`: first Compile & Run | 2.5 | Not measured separately | Not measured separately |
+| C/C++ LLDB panel ready | 4.7 | Stays loaded | 0.3 |
+| C++ Start, including build → breakpoint | 3.3 | 0.5–0.6 on restart | 1.8 |
+| `clang-repl` → prompt | 14.0 | 0.3 on reopening | 1.1 |
+| LLVM CFG, opt + dot | 3.8–6.8 | 0.2 | 0.5–0.6 |
+| MLIR CFG, mlir-opt with dot already loaded | 5.3–8.7 | 0.2–0.4 | Not measured separately |
+| `llc --version` | 3.6–7.3 | 0.05–0.1 | 0.3 |
+| `llvm-nm --version` | 2.0–2.6 | 0.2 | 0.2 |
+| `mlir-translate --version` | 2.0–4.3 | 0.2–0.4 | 0.2–0.3 |
+| Enable clangd → service ready | 3.2–6.4 | Not measured separately | 0.5–0.6 |
+
+Range rows combine observations from the two C/C++ deployments, whose network
+throughput differed. clangd service readiness does not imply all headers have
+finished parsing. Both demos passed C++ source-only AST, LLVM output generation,
+LLVM/MLIR CFG, tool startup and cached payload reuse. LLDB checks cover C++, C,
+LLVM IR sum/result values, JSON, multi-file Swift stepping, variables, restart,
+stdout and disabled Pause after exit. REPL checks cover persistent state,
+Foundation Date/Codable, error recovery, reset, interruption and reopening.
 
 ## Warm compilation and execution
 
-Five calls per program, using the resident compiler worker and loaded SDKs.
+Measured **2026-10-11**, five calls per program, using the resident compiler worker
+and loaded SDKs. These older warm measurements use the same compiler binary;
+this packaging change does not alter compiled code.
 Commands follow `swiftc -O <inputs> -o benchmark.wasm`, reusing one output file.
 Values are median (range), in **milliseconds**. Build includes compilation,
 linking and returning the output bytes. Run includes Wasm instantiation,
@@ -63,30 +125,16 @@ Fibonacci output generation, three clicks each, had median times of **178 ms**
 for AST, **421 ms** for SIL, **211 ms** for unoptimized LLVM IR, **199 ms** for
 optimized IR and **429 ms** for assembly. These use the loaded Swift compiler.
 
-## Debugger and REPL interaction
+## Repeating measurements
 
-With LLDB ready and `multi-debug.wasm` already built, Start → `main.swift:2`
-took **2.0–3.3 s** across two runs. Restart took **1.3–2.4 s** across six calls.
-Step into `math.swift` and subsequent steps, including frame/variable updates,
-took **62–85 ms**. This excludes the panel's first download and building the binary.
+For first-visit timings, use a fresh browser profile or clear site data. Time page
+opening to Compile becoming enabled, then first Compile & Run to expected stdout
+and restored readiness. Keep page-to-output separate from compiler readiness.
+Repeat without reload for resident-session timings; reload without clearing data
+for cached timings. For REPL, measure `swift repl`, `import Foundation`, then
+`:quit` and `swift repl` again. Record whether optional SDK warming had finished.
 
-The first REPL `1 + 1` took **0.4–0.7 s**; ten subsequent expressions took
-**50–141 ms**. After importing Foundation, the first Date expression took
-**0.4–0.6 s**, with subsequent expressions taking **66–118 ms**. These include
-cell compilation/linking/execution and returning the terminal prompt.
-Separate correctness checks cover persistent definitions, multiline functions,
-Foundation Date/Codable, error recovery, reset, interruption and multi-file stepping.
-
-## Repeating the measurements
-
-For cold timings, clear this site's browser data and open the demo. Time until
-Compile is enabled, select `dates.swift` with optimization **O**, then time
-Compile & Run until stdout and compiler readiness return. Repeat without reload
-for warm timings; reload without clearing site data for cached timings.
-In the advanced terminal, time `swift repl`, `import Foundation`, then `:quit`
-and `swift repl` again. Cold REPL startup is additional to page startup.
-
-Suggested demo wording: “On an M5 Mac in Chrome, these examples compile, link
-and run in roughly 0.5–1.5 seconds once loaded. First use downloads the toolchain;
-the REPL took 15–25 seconds initially, about 2 seconds to reopen, and about
-3 seconds after a cached reload. Everything executes locally in the browser.”
+Suggested wording: “The editor appears in about a second. On our M5 Mac in Chrome,
+Swift becomes ready in about 11 seconds on first visit, and about 1–2 seconds
+after caching. First Fibonacci output takes 14–15 seconds from page opening;
+repeated runs take about half a second. Everything executes in the browser.”

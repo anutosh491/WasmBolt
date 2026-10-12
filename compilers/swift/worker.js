@@ -1,11 +1,12 @@
-import createCompiler from './wasmbolt-swift.js';
 import { downloadWasm } from '../../runtime/load-wasm.js';
-import { installSdk, loadSdk } from './sdk.js';
+import { installSdk, loadSdk, warmSdkLibraries } from './sdk.js';
 
 let compiler, stdout = [], stderr = [];
-let foundation;
+let foundation, linkRuntime, warmingLibraries;
 const installFoundation = () => foundation ||= installSdk(compiler.FS, loadSdk('foundation.tar.gz'))
   .catch(error => { foundation = null; throw error; });
+const installLinkRuntime = () => linkRuntime ||= installSdk(compiler.FS, loadSdk('link-runtime.tar.gz'))
+  .catch(error => { linkRuntime = null; throw error; });
 function importsFoundation(path) {
   try {
     return /\bimport\s+(?:(?:class|struct|enum|func|var|let|typealias)\s+)?(?:Foundation\w*|CoreFoundation|_Foundation\w*)\b/
@@ -29,13 +30,20 @@ self.onmessage = async ({ data: { id, command, args, inputs = [], paths = [] } }
   try {
     if (command === 'initialize') {
       if (!crossOriginIsolated) throw new Error('Swift needs COOP/COEP headers and shared memory');
+      const binaryDownload = downloadWasm(new URL('./wasmbolt-swift.wasm', import.meta.url));
+      const sdkDownload = loadSdk();
+      // Optional downloads can overlap initialization once core downloads finish.
+      Promise.all([binaryDownload, sdkDownload])
+        .then(() => warmSdkLibraries(name => name === 'link-runtime.tar.gz')).catch(() => {});
       const [module, sdk] = await Promise.all([
-        downloadWasm(new URL('./wasmbolt-swift.wasm', import.meta.url)).then(binary => createCompiler({
-        noInitialRun: true, noExitRuntime: true,
-        locateFile: name => new URL(name, import.meta.url).href,
-        wasmBinary: new Uint8Array(binary),
-        print: text => stdout.push(text), printErr: text => stderr.push(text),
-        })), loadSdk()]);
+        Promise.all([import('./wasmbolt-swift.js'),
+          binaryDownload])
+          .then(([{ default: createCompiler }, binary]) => createCompiler({
+            noInitialRun: true, noExitRuntime: true,
+            locateFile: name => new URL(name, import.meta.url).href,
+            wasmBinary: new Uint8Array(binary),
+            print: text => stdout.push(text), printErr: text => stderr.push(text),
+          })), sdkDownload]);
       compiler = module;
       await installSdk(compiler.FS, sdk);
       // Paths used by native driver tool discovery. Jobs execute in-process.
@@ -63,6 +71,19 @@ self.onmessage = async ({ data: { id, command, args, inputs = [], paths = [] } }
     const needsFoundation = args.some(argument => /^-l(?:Foundation|CoreFoundation|_Foundation|xml2)/.test(argument) ||
       (/\.swift$/.test(argument) && importsFoundation(argument)));
     if (needsFoundation) await installFoundation();
+    if (!linkRuntime) {
+      const tool = args[0].split('/').pop();
+      const information = args.length === 2 && ['--version', '-version', '--help', '-help', '-h'].includes(args[1]);
+      let linking = !information && ['clang', 'clang++', 'wasm-ld'].includes(tool);
+      if (['swift', 'swiftc'].includes(tool)) {
+        // Ask the native driver, including response-file/options handling,
+        // rather than duplicating its rules for which actions need linking.
+        stdout = []; stderr = [];
+        compiler.ccall('wb_swift_run', 'number', ['string'], [JSON.stringify([...args, '-###'])]);
+        linking = [...stdout, ...stderr].some(line => /^\s*"?(?:[^\s"]*\/)?(?:clang(?:\+\+)?|wasm-ld)(?:[\s"]|$)/.test(line));
+      }
+      if (linking) await installLinkRuntime();
+    }
     stdout = []; stderr = [];
     let code = compiler.ccall('wb_swift_run', 'number', ['string'], [JSON.stringify(args)]);
     // Imported user modules can themselves depend on Foundation.
@@ -78,5 +99,7 @@ self.onmessage = async ({ data: { id, command, args, inputs = [], paths = [] } }
       .map(([path]) => ({ path, bytes: compiler.FS.readFile(path) }));
     postMessage({ id, result: { code, stdout, stderr, files: outputs } },
       outputs.map(file => file.bytes.buffer));
+    if (!code && args.some(argument => /\.(swift|sil|ll|bc|o)$/.test(argument) || argument.startsWith('@')))
+      warmingLibraries ||= warmSdkLibraries(name => !name.startsWith('repl-')).catch(() => {});
   } catch (error) { postMessage({ id, error: error.message }); }
 };

@@ -1,13 +1,30 @@
 import { downloadWasm } from '../../runtime/load-wasm.js';
 
-export async function loadSdk(name = 'runtime.tar.gz') {
-  const compressed = await downloadWasm(new URL(name, import.meta.url));
-  const bytes = new Uint8Array(compressed);
-  // Pages serves Brotli-compressed tar chunks; fetch already decoded them.
-  // Local staging serves the original gzip archives.
-  if (bytes[0] !== 0x1f || bytes[1] !== 0x8b) return bytes;
-  return new Uint8Array(await new Response(new Blob([compressed]).stream().pipeThrough(
-    new DecompressionStream('gzip'))).arrayBuffer());
+const downloads = new Map();
+export function loadSdk(name = 'runtime.tar.gz', options) {
+  if (downloads.has(name)) return downloads.get(name);
+  const loading = (async () => {
+    const compressed = await downloadWasm(new URL(name, import.meta.url), options);
+    const bytes = new Uint8Array(compressed);
+    // Pages serves decoded tar chunks; local staging serves gzip archives.
+    if (bytes[0] !== 0x1f || bytes[1] !== 0x8b) return bytes;
+    return new Uint8Array(await new Response(new Blob([compressed]).stream().pipeThrough(
+      new DecompressionStream('gzip'))).arrayBuffer());
+  })().finally(() => downloads.delete(name));
+  downloads.set(name, loading);
+  return loading;
+}
+
+export async function warmSdkLibraries(select = () => true) {
+  if (navigator.connection?.saveData) return;
+  const response = await fetch(new URL('./sdk-libraries.json', import.meta.url), { priority: 'low' });
+  if (!response.ok) return;
+  const libraries = await response.json();
+  for (const name of libraries) {
+    if (!/^[\w.-]+\.tar\.gz$/.test(name) || !select(name)) continue;
+    // Sequential, low-priority downloads; installation stays on demand.
+    try { await loadSdk(name, { priority: 'low' }); } catch { /* retry on use */ }
+  }
 }
 
 // Extract regular SDK files only; preserve no archive links or parent paths.

@@ -15,7 +15,7 @@ const destination = resolve(process.argv[3] || join(root, 'compilers/swift/.work
 // mirror excluding large binaries, without touching the source site.
 const mirror = join(root, 'compilers/swift/.work/pages-input');
 const binaries = ['compilers/swift/wasmbolt-swift.wasm'];
-const sdks = ['runtime.tar.gz', 'foundation.tar.gz', 'modules.tar.gz', 'repl-modules.tar.gz', 'repl-foundation.tar.gz']
+const sdks = ['runtime.tar.gz', 'link-runtime.tar.gz', 'foundation.tar.gz', 'modules.tar.gz', 'repl-modules.tar.gz', 'repl-foundation.tar.gz']
   .map(name => 'compilers/swift/' + name);
 for (const optional of ['debugger/lldb/lldb-dap.wasm', 'compilers/swift/wasmbolt-swift-repl.wasm'])
   if (await stat(join(source, optional)).catch(() => null)) binaries.push(optional);
@@ -42,11 +42,15 @@ async function publishPayload(path, encoding = '') {
 }
 async function compressParts(path, bytes) {
   const parts = [];
+  const essential = /\/(?:wasmbolt-swift(?:-repl)?\.wasm|runtime\.tar\.gz|link-runtime\.tar\.gz|repl-modules\.tar\.gz)$/.test(path);
   for (let offset = 0, index = 0; offset < bytes.length; offset += 64 * 1024 * 1024, index++) {
     const name = `${path}.part${index}`, output = join(destination, name);
     await mkdir(dirname(output), { recursive: true });
     await pipeline(Readable.from([bytes.subarray(offset, offset + 64 * 1024 * 1024)]),
-      createBrotliCompress({ params: { [constants.BROTLI_PARAM_QUALITY]: 9 } }),
+      createBrotliCompress({ params: {
+        [constants.BROTLI_PARAM_QUALITY]: essential ? 11 : 9,
+        [constants.BROTLI_PARAM_LGWIN]: essential ? 24 : 22,
+      } }),
       createWriteStream(output));
     if ((await stat(output)).size > 25 * 1024 * 1024)
       throw new Error(`Pages part exceeds file limit: ${name}`);

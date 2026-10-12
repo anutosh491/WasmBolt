@@ -2,7 +2,7 @@ import createREPL from './wasmbolt-swift-repl.js';
 import { installSdk, loadSdk } from './sdk.js';
 
 let repl, foundation, stdout = [], stderr = [], input = '';
-self.onmessage = async ({ data: { id, command, source, compiledModule, sdk } }) => {
+self.onmessage = async ({ data: { id, command, source, compiledModule, sdk, baseSdk } }) => {
   try {
     stdout = []; stderr = [];
     if (command === 'initialize') {
@@ -17,6 +17,7 @@ self.onmessage = async ({ data: { id, command, source, compiledModule, sdk } }) 
         print: text => stdout.push(text), printErr: text => stderr.push(text) }),
         sdk || loadSdk('repl-modules.tar.gz')]);
       repl = module;
+      await installSdk(repl.FS, baseSdk || loadSdk());
       await installSdk(repl.FS, archive);
       repl.FS.mkdirTree('/workspace'); repl.FS.chdir('/workspace');
       const code = repl.ccall('wb_swift_repl_initialize', 'number', [], []);

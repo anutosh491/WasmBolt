@@ -51,6 +51,8 @@ for suffix in ['js', 'wasm']:
          site / 'compilers/swift' / f'wasmbolt-swift.{suffix}')
 copy(a.work / 'swift-package/runtime.tar.gz',
      site / 'compilers/swift/runtime.tar.gz')
+copy(a.work / 'swift-package/link-runtime.tar.gz',
+     site / 'compilers/swift/link-runtime.tar.gz')
 copy(a.work / 'swift-package/modules.tar.gz',
      site / 'compilers/swift/modules.tar.gz')
 with_foundation = (a.work / 'swift-package/foundation.tar.gz').is_file()
@@ -103,12 +105,19 @@ if a.swift_only:
     (site / 'index.html').write_text(html)
 for path in ['compilers/swift/wasmbolt-swift.wasm',
              'compilers/swift/runtime.tar.gz', 'compilers/swift/modules.tar.gz',
+             'compilers/swift/link-runtime.tar.gz',
              *(['compilers/swift/foundation.tar.gz'] if with_foundation else []),
              *(['compilers/swift/repl-foundation.tar.gz'] if with_repl and foundation.is_file() else []),
              *(['compilers/swift/repl-modules.tar.gz'] if with_repl else []),
              *(['debugger/lldb/lldb-dap.wasm'] if with_debugger else []),
              *(['compilers/swift/wasmbolt-swift-repl.wasm'] if with_repl else [])]:
     (site / (path + '.parts.json')).write_text(json.dumps([Path(path).name]) + '\n')
+# Warm packaged library/SDK archives without delaying compiler readiness.
+libraries = sorted(path.name for path in (site / 'compilers/swift').glob('*.tar.gz')
+                   if path.name not in ['runtime.tar.gz', 'modules.tar.gz'])
+libraries.sort(key=lambda name: (name != 'link-runtime.tar.gz', name.startswith('repl-'),
+                                not name.endswith('-modules.tar.gz'), name))
+(site / 'compilers/swift/sdk-libraries.json').write_text(json.dumps(libraries) + '\n')
 (site / '_headers').write_text('/*\n  Cross-Origin-Opener-Policy: same-origin\n'
     '  Cross-Origin-Embedder-Policy: require-corp\n'
     '  Cross-Origin-Resource-Policy: same-origin\n')

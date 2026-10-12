@@ -1,7 +1,7 @@
 # Swift browser build summary
 
 Swift compilation and Swift-aware LLDB use the preserved build from 2026-10-04.
-This branch is based on structured WasmBolt main `782a4b8` (2026-10-11), including
+This branch is based on structured WasmBolt main `d393a4f` (2026-10-12), including
 resident Clang outputs, shared asset caching, cached analysis modules, the Debug
 target picker and optional clangd. It extends that UI directly;
 no workbench, Jupyter/Lumino application or old dependency tree is imported.
@@ -36,7 +36,8 @@ supports the compiler's Swift code. A separate single-threaded static runtime
 supports ordinary guest programs and WAMR.
 
 The compiler Wasm is 125 MiB and Swift-enabled LLDB Wasm 138 MiB before HTTP
-compression. The core SDK archive is about 23 MiB gzip, with an optional
+compression. The core SDK archive is about 13 MiB gzip, with a separate
+11 MiB link archive and an optional
 28 MiB Foundation archive, including matching Emscripten link inputs and Clang
 resource headers. Identical root/wasm32 runtime
 archive copies are packaged once; linker paths use the wasm32 directory.
@@ -372,9 +373,19 @@ it does not change the compiler/debugger runtimes or guest linking defaults.
 
 ## Demo performance and separate REPL SDK
 
-The compiler downloads its Wasm and core SDK concurrently and starts Wasm
-initialization as soon as that binary arrives. It remains resident. Foundation
-loads on the first relevant import or link, rather than before compiler readiness.
+The compiler downloads its JS, Wasm and core SDK concurrently and starts Wasm
+initialization as soon as that binary arrives. It remains resident. The initial
+SDK contains headers and Swift modules; target archives and startup objects are
+in `link-runtime.tar.gz`. Before the first executable build, the worker asks the
+native driver for its `-###` job plan and installs link inputs when needed.
+Frontend-only actions do not need those archives; native response files still work.
+After both essential downloads finish, link inputs warm first. Other compiler
+libraries warm after a source compilation; optional REPL libraries warm after
+its prompt is ready. REPL downloads never start during compiler initialization.
+A generated SDK catalog selects the appropriate
+archives and downloads sequentially with low-priority requests, unless data saving
+is enabled. Installation stays
+on demand, and concurrent requests for the same SDK share one download.
 Workspace synchronization sends changed inputs, propagates deletions and avoids
 copying a generated Wasm binary back into the compiler before rebuilding it.
 Compile & Run uses one `swiftc` compile/link job sequence. LLDB receives only
@@ -387,7 +398,13 @@ Warm local Chrome compile/link calls measured roughly 0.5 s for Fibonacci and
 about two to three times faster; this demo does not claim native performance parity.
 The split programs also reduce linked output: JSON is about 21 MiB, Date about 65 MiB.
 
-The REPL uses `repl-modules.tar.gz` from the pthread host standard library.
+The REPL installs the cached core SDK, then `repl-modules.tar.gz` containing
+only files absent from that SDK or different for the pthread host runtime.
+This avoids downloading 48 MiB of identical headers twice. Foundation module
+metadata remains in the base REPL SDK: this persistent compiler context caches
+module discovery, so deferring those directories failed its first import.
+The matching Foundation runtime library remains on demand.
+Compiler SDK and linker inputs remain byte-for-byte unchanged by this REPL split.
 `61-build-repl-foundation.sh` packages matching host Foundation modules and a
 separate shared Wasm library, loaded only when imported. Its runtime export list
 comes from that library's imports. `swift-repl-runtime-loading.patch` canonicalizes
@@ -426,13 +443,21 @@ Wasm chunks use HTTP Brotli compression and content-hashed filenames. The browse
 automatically decodes Brotli; the small SDK parser handles regular tar files.
 Local staging still uses gzip archives and native DecompressionStream. No
 untarjs dependency is used. Initial compiler transfer falls from about 78 MiB to
-44 MiB; the REPL is not downloaded during compiler startup. The REPL Foundation
+44 MiB in the previous package. Splitting link inputs and stronger Brotli
+compression reduce the initial payload to about 30 MiB, with another 7 MiB for
+linking. Compression round-trips to identical compiler bytes; it changes neither
+the build nor its ABI. The REPL executable also uses stronger compression, reducing
+its transfer from about 26 MiB to 22 MiB. The host SDK overlay transfers 7.5 MiB
+instead of repeating a 13 MiB full SDK. Both remain on demand. The REPL Foundation
 bundle excludes duplicate standard-library modules already in its base SDK.
 
 Chrome did not retain the large payloads in its automatic HTTP cache despite
 immutable headers. The loader therefore caches hashed payloads in CacheStorage,
 removes superseded parts of the same payload, and falls back to downloads if
-storage is unavailable. A fresh browser still needs its first download.
+storage is unavailable. When Web Locks are available, per-part locks coordinate
+cache writes across workers: REPL imports can reuse an in-progress compiler
+prefetch rather than download the same SDK part again. A fresh browser still
+needs its first download.
 [Demo benchmarks](benchmarks.md) record first-use, same-page and cached-reload
 timings, including Date compilation/execution, CFG, LLDB and REPL startup.
 
