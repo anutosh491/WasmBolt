@@ -68,7 +68,7 @@ void *loadSymbol(const char *ModulePath, const char *Symbol) {
 
 } // namespace
 
-extern "C" EMSCRIPTEN_KEEPALIVE int run_command(const char *Command) {
+static int runCommand(const char *Command, bool SourceAST) {
   if (Command == nullptr)
     return 2;
 
@@ -81,11 +81,19 @@ extern "C" EMSCRIPTEN_KEEPALIVE int run_command(const char *Command) {
 
   const llvm::StringRef Program = llvm::sys::path::filename(Args.front());
   if (Program == "clang" || Program == "clang++")
-    return runClang(std::move(Args));
+    return runClang(std::move(Args), SourceAST);
   if (Program == "wasm-ld" || Program == "ld.lld")
     return runLld(Args);
   llvm::errs() << "unsupported in-process tool: " << Program << '\n';
   return 127;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int run_command(const char *Command) {
+  return runCommand(Command, false);
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int run_source_ast(const char *Command) {
+  return runCommand(Command, true);
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE int wasmbolt_pointer_bits() {
