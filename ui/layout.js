@@ -24,7 +24,7 @@ export function configureResizers() {
   };
   const setTerminal = (height) => {
     height = Math.max(0, Math.min(workspace.clientHeight - 8, height));
-    if (height) expandedHeight = height;
+    if (advanced.open && height) expandedHeight = height;
     workspace.style.setProperty('--console-height', `${height}px`);
     collapsed('console', height === 0);
     collapsed('top', height === workspace.clientHeight - 8);
