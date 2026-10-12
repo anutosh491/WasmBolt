@@ -21,6 +21,7 @@
       <symbol id="icon-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1" /></symbol>
       <symbol id="icon-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></symbol>
       <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
+      <symbol id="icon-files" viewBox="0 0 24 24"><path d="M7 7H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2M14 3v5h5M9 3h5l5 5v7a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" /></symbol>
     </svg>
     <header class="topbar">
       <div class="brand">
@@ -76,11 +77,16 @@
     </section>
 
     <main id="workspace" class="workspace">
-      <aside class="explorer" aria-label="Workspace files">
+      <nav id="activity-bar" class="activity-bar" aria-label="Workspace panels">
+        <button id="toggle-explorer" aria-label="Toggle files" aria-controls="explorer" aria-expanded="true" title="Files"><svg class="ui-icon" aria-hidden="true"><use href="#icon-files"></use></svg></button>
+      </nav>
+      <aside id="explorer" class="explorer" aria-label="Workspace files">
         <div class="pane-title"><strong>Explorer</strong><button id="new-file" class="quiet" disabled title="New source file" aria-label="New source file"><svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg></button></div>
         <div class="workspace-root">workspace</div>
         <div id="workspace-files" class="workspace-files"></div>
       </aside>
+
+      <div id="explorer-resizer" class="resizer explorer-resizer" role="separator" aria-label="Resize Explorer" aria-orientation="vertical" tabindex="0" title="Drag to resize; double-click to restore"></div>
 
       <section class="pane source-pane">
         <div class="pane-title">
@@ -99,7 +105,7 @@
         </div>
       </section>
 
-      <div id="vertical-resizer" class="resizer vertical" title="Drag to resize"></div>
+      <div id="vertical-resizer" class="resizer vertical" role="separator" aria-label="Resize source and output" aria-orientation="vertical" tabindex="0" title="Drag to resize; double-click to restore"></div>
 
       <section class="pane output-pane">
         <div class="pane-title output-title">
@@ -156,7 +162,7 @@
         <section class="debugger-console"><h3>Debug console</h3><pre id="debugger-log" aria-live="polite"></pre><input id="debugger-command" aria-label="Debugger command" placeholder="Debugger not installed" disabled /></section>
       </section>
 
-      <div id="horizontal-resizer" class="resizer horizontal" title="Drag to resize"></div>
+      <div id="horizontal-resizer" class="resizer horizontal" role="separator" aria-label="Resize terminal" aria-orientation="horizontal" tabindex="0" title="Drag to resize; double-click to restore"></div>
 
       <details id="advanced" class="advanced-pane">
         <summary><span>Advanced terminal</span><small>run clang, mlir-opt, mlir-translate, opt, llc, dot and wasm-ld</small></summary>

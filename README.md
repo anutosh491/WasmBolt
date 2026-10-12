@@ -25,7 +25,7 @@ LLVM CFG -> opt in a Worker -> DOT -> Graphviz in a Worker -> SVG
 - C23 and C++23 source;
 - tensor-based MLIR input, the complete `mlir-opt` dialect/pass registry, and
   `mlir-translate` for translation to LLVM IR;
-- Clang diagnostics and textual AST dumps;
+- Clang diagnostics and source AST dumps (including headers through the terminal);
 - optional clangd completion, diagnostics and definitions for C/C++ editing;
 - unoptimized and optimized LLVM IR;
 - configurable new-pass-manager pipelines such as `default<O2>`;

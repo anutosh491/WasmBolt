@@ -1,6 +1,9 @@
 import { updateDebuggerTarget } from "./debugger-target.js";
 import { installClangd } from "../language-services/clangd/ui.js";
 import { examples } from "./examples.js";
+import { outputPreview, terminalHistory } from "./output.js";
+import { configureResizers } from "./layout.js";
+import { configureTerminal } from "./terminal.js";
 import { publicFunctionExports, displayFunctionExport, parseWasmFunctionSignatures } from "../runtime/exports.js";
 import { runTool, isToolCommand, workspaceFiles, prepareTool } from "../tools/client.js";
 import { compileWasm, downloadWasm } from "../runtime/load-wasm.js";
@@ -77,7 +80,7 @@ function appendLog(line, kind = "out") {
     (kind === "err" ? activeStderrCapture : activeStdoutCapture).push(text);
     return;
   }
-  elements.log.append(`${rendered}\n`);
+  elements.log.textContent = terminalHistory(elements.log.textContent, `${rendered}\n`);
   const terminal = $("#terminal-scroll");
   if (terminal) terminal.scrollTop = terminal.scrollHeight;
 }
@@ -165,7 +168,7 @@ function switchTab(tab) {
   activeTab = tab;
   document.querySelectorAll("#tabs button").forEach((button) =>
     button.classList.toggle("active", button.dataset.tab === tab));
-  elements.output.textContent = outputs[tab] || "No output yet.";
+  elements.output.textContent = outputPreview(outputs[tab] || "No output yet.");
   elements.output.classList.toggle("hidden", tab === "cfg");
   elements.cfgView.classList.toggle("hidden", tab !== "cfg");
   elements.fileBrowser.classList.toggle("hidden", tab !== "files");
@@ -222,7 +225,7 @@ function refreshWorkspaceFiles(preferred = "") {
         return `${path.replace("/workspace/", "").padEnd(28)} ${String(size).padStart(9)} bytes`;
       }).join("\n")
     : "The browser filesystem is empty.";
-  if (activeTab === "files") elements.output.textContent = outputs.files;
+  if (activeTab === "files") elements.output.textContent = outputPreview(outputs.files);
   renderExplorer(files);
   updateDebuggerTarget(files, languageSettings().filename);
 }
@@ -285,7 +288,7 @@ function toggleDebugger(visible) {
 }
 
 function isTextFile(path) {
-  return /\.(?:c|cc|cpp|cxx|h|hpp|mlir|ll|mir|s|dot|svg|txt|json)$/i.test(path);
+  return /\.(?:c|cc|cpp|cxx|h|hpp|mlir|ll|mir|s|ast|dot|svg|txt|json)$/i.test(path);
 }
 
 function openWorkspaceFile(path = elements.fileSelect.value) {
@@ -359,7 +362,6 @@ function commandText(settings, action, target = elements.target.value) {
 }
 
 async function run(command, redirects = {}) {
-  appendLog("");
   activeCapture = [];
   activeLogCapture = [];
   activeStdoutCapture = [];
@@ -378,7 +380,8 @@ async function run(command, redirects = {}) {
       if (result.error && !result.stderr.length) appendLog(result.error, "err");
       code = result.status;
     } else {
-      code = compiler.ccall("run_command", "number", ["string"], [command]);
+      code = compiler.ccall(redirects.sourceAST ? "run_source_ast" : "run_command",
+        "number", ["string"], [command]);
     }
     captured = activeCapture.join("\n");
   } finally {
@@ -410,10 +413,14 @@ async function run(command, redirects = {}) {
 function parseCommandRedirections(command) {
   const redirects = {};
   let executable = command;
-  const stderr = executable.match(/(?:^|\s)2>\s*(?:"([^"]+)"|'([^']+)'|(\S+))/);
-  if (stderr) {
-    redirects.stderr = stderr[1] || stderr[2] || stderr[3];
-    executable = `${executable.slice(0, stderr.index)} ${executable.slice(stderr.index + stderr[0].length)}`;
+  for (const [stream, pattern] of [
+    ["stderr", /(?:^|\s)2>\s*(?:"([^"]+)"|'([^']+)'|(\S+))/],
+    ["stdout", /(?:^|\s)>\s*(?:"([^"]+)"|'([^']+)'|(\S+))/],
+  ]) {
+    const redirect = executable.match(pattern);
+    if (!redirect) continue;
+    redirects[stream] = redirect[1] || redirect[2] || redirect[3];
+    executable = `${executable.slice(0, redirect.index)} ${executable.slice(redirect.index + redirect[0].length)}`;
   }
   return { command: executable.trim(), redirects };
 }
@@ -426,6 +433,13 @@ async function emitIr(settings, target) {
     await emitClangOutput(settings, "ir", target);
   }
   return outputs.ir;
+}
+
+async function emitAst(settings) {
+  const command = commandText(settings, "ast");
+  appendLog(`$ ${command}`);
+  await run(command, { sourceAST: true, stdout: "/workspace/source.ast" });
+  return outputs.ast = readText("/workspace/source.ast");
 }
 
 async function emitClangOutput(settings, stage, target = elements.target.value) {
@@ -455,7 +469,7 @@ async function compileSelectedOutput() {
       if (stage === "cfg") await renderMlirCfg();
     } else if (stage === "ast") {
       if (settings.llvmIr) throw new Error("Clang AST is not applicable to LLVM IR input");
-      outputs.ast = await run(commandText(settings, "ast"));
+      await emitAst(settings);
     } else if (stage === "cfg") {
       await Promise.all([prepareTool("opt"), prepareTool("dot"),
         emitClangOutput(settings, "optimized")]);
@@ -742,63 +756,6 @@ function restoreState() {
   resetSource();
 }
 
-function configureResizers() {
-  const workspace = $("#workspace");
-  const vertical = $("#vertical-resizer");
-  const horizontal = $("#horizontal-resizer");
-  const advanced = $("#advanced");
-  let expandedHeight = 260;
-
-  const setAdvancedHeight = (height) => {
-    expandedHeight = height;
-    workspace.style.setProperty("--console-height", `${height}px`);
-  };
-
-  advanced.addEventListener("toggle", () => {
-    workspace.style.setProperty("--console-height", advanced.open ? `${expandedHeight}px` : "38px");
-    if (advanced.open) requestAnimationFrame(() => {
-      const terminal = $("#terminal-scroll");
-      terminal.scrollTop = terminal.scrollHeight;
-    });
-  });
-  workspace.style.setProperty("--console-height", advanced.open ? `${expandedHeight}px` : "38px");
-
-  const begin = (event, orientation) => {
-    if (innerWidth <= 900) return;
-    event.preventDefault();
-    const handle = orientation === "vertical" ? vertical : horizontal;
-    if (orientation === "horizontal" && !advanced.open) advanced.open = true;
-    handle.setPointerCapture?.(event.pointerId);
-    handle.classList.add("dragging");
-    document.body.style.cursor = orientation === "vertical" ? "col-resize" : "row-resize";
-    document.body.style.userSelect = "none";
-    const move = (moveEvent) => {
-      const bounds = workspace.getBoundingClientRect();
-      if (orientation === "vertical") {
-        const percent = Math.max(24, Math.min(76, ((moveEvent.clientX - $(".source-pane").getBoundingClientRect().left) / (bounds.width - $(".explorer").getBoundingClientRect().width)) * 100));
-        document.documentElement.style.setProperty("--source-ratio", String(percent / 100));
-      } else {
-        const height = Math.max(220, Math.min(bounds.height - 260, bounds.bottom - moveEvent.clientY));
-        setAdvancedHeight(height);
-      }
-    };
-    const end = () => {
-      handle.classList.remove("dragging");
-      handle.releasePointerCapture?.(event.pointerId);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", end);
-      window.removeEventListener("pointercancel", end);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", end);
-    window.addEventListener("pointercancel", end);
-  };
-  vertical.addEventListener("pointerdown", (event) => begin(event, "vertical"));
-  horizontal.addEventListener("pointerdown", (event) => begin(event, "horizontal"));
-}
-
 function wireUi() {
   renderSourceGutter();
   elements.source.addEventListener("scroll", () => { $("#source-gutter").scrollTop = elements.source.scrollTop; });
@@ -838,11 +795,18 @@ function wireUi() {
   for (const select of [elements.optimization, elements.target])
     select.addEventListener("change", saveState);
   $("#clear-log").addEventListener("click", () => { elements.log.textContent = ""; });
-  $("#copy-output").addEventListener("click", () => navigator.clipboard.writeText(elements.output.textContent));
+  $("#copy-output").addEventListener("click", () => navigator.clipboard.writeText(outputs[activeTab] || ""));
   $("#share").addEventListener("click", shareState);
+  configureTerminal(elements.command, elements.commandLine,
+    () => { elements.log.textContent = ""; }, appendLog);
   elements.commandLine.addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (!elements.command.value.trim() || busy || !compiler) return;
+    if (busy || !compiler) return;
+    if (!elements.command.value.trim()) {
+      appendLog(elements.commandLine.querySelector("span").textContent);
+      elements.command.value = "";
+      return;
+    }
     const command = elements.command.value.trim();
     elements.command.value = "";
     setBusy(true, "Running command…");
@@ -852,7 +816,7 @@ function wireUi() {
       writeSource();
       const parsed = parseCommandRedirections(command);
       const captured = await run(parsed.command, parsed.redirects);
-      const outputPath = parsed.redirects.stderr ||
+      const outputPath = parsed.redirects.stdout || parsed.redirects.stderr ||
         commandOutputPath(parsed.command);
       refreshWorkspaceFiles(outputPath);
       if (outputPath && outputPath !== "-" && workspaceFiles(compiler.FS).includes(outputPath))
@@ -950,7 +914,7 @@ async function loadCompiler() {
     const autorun = new URLSearchParams(location.search).get("autorun");
     if (autorun === "1" || autorun === "driver") {
       const settings = writeSource();
-      outputs.ast = settings.llvmIr ? "LLVM IR input starts after the Clang AST stage." : await run(commandText(settings, "ast"));
+      outputs.ast = settings.llvmIr ? "LLVM IR input starts after the Clang AST stage." : await emitAst(settings);
       await emitIr(settings, elements.target.value);
       await emitClangOutput(settings, "optimized");
       await renderCfg();
